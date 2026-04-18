@@ -239,12 +239,16 @@ function useGistSync(store, setStore) {
         const { storeData: cloudData, syncedAt: cloudSyncedAt, gistUpdatedAt } = await downloadGist(gistId, gistToken);
         if (!alive) return;
 
-        // Prefer embedded _cloudSyncedAt; fall back to gist.updated_at for old gists
-        const cloudMs = dateToMs(cloudSyncedAt) || dateToMs(gistUpdatedAt);
-        // Use saved.lastSync (closure at mount) — avoids stale state issues
-        const localMs = dateToMs(saved?.lastSync);
+        // Compare user-edit timestamps, not upload timestamps.
+        // _localModifiedAt is set only on user actions (upsertEntry, settings changes, etc.)
+        // and is preserved on import — so it reliably reflects which device last changed data.
+        // Falls back to _cloudSyncedAt / gist.updated_at for stores predating this field.
+        const cloudModMs = dateToMs(cloudData._localModifiedAt)
+          || dateToMs(cloudSyncedAt) || dateToMs(gistUpdatedAt);
+        const localModMs = dateToMs(storeRef.current._localModifiedAt)
+          || dateToMs(saved?.lastSync);
 
-        if (cloudMs > localMs + 3000) {
+        if (cloudModMs > localModMs + 3000) {
           // ☁️ Cloud is newer — silently import
           if (cloudData && cloudData.entries) {
             normalizeStore(cloudData);
@@ -576,15 +580,24 @@ function App() {
     return { inc, exp, net };
   }, [monthEntries, rates, store.totalBudget]);
 
+  // updateStore: user-initiated changes — stamps _localModifiedAt so startup sync
+  // can compare "last user edit" instead of "last upload time" across devices
+  const updateStore = useCallback((fn) => {
+    setStore(prev => {
+      const next = typeof fn === 'function' ? fn(prev) : fn;
+      return { ...next, _localModifiedAt: new Date().toISOString() };
+    });
+  }, []);
+
   const upsertEntry = (entry) => {
-    setStore(s => {
+    updateStore(s => {
       const list = [...s.entries];
       const idx = list.findIndex(x=>x.id===entry.id);
       if (idx>=0) list[idx]=entry; else list.push(entry);
       return {...s, entries:list};
     });
   };
-  const removeEntry = (id) => setStore(s => ({...s, entries:s.entries.filter(e=>e.id!==id)}));
+  const removeEntry = (id) => updateStore(s => ({...s, entries:s.entries.filter(e=>e.id!==id)}));
   const openAdd = () => { setEditing(null); setEntryOpen(true); };
   const openEdit = (e) => { setEditing(e); setEntryOpen(true); };
 
@@ -639,7 +652,7 @@ function App() {
         {tab==="home"  && <HomeView store={store} rates={rates} base={base} entries={monthEntries} onEdit={openEdit} onDelete={removeEntry} monthTotals={monthTotals} viewMonth={viewMonth} />}
         {tab==="cal"   && <CalendarView store={store} rates={rates} base={base} viewMonth={viewMonth} entries={monthEntries} onEdit={openEdit} />}
         {tab==="chart" && <ChartView store={store} rates={rates} base={base} entries={monthEntries} allEntries={store.entries} viewMonth={viewMonth} />}
-        {tab==="set"   && <SettingsView store={store} setStore={setStore} drive={drive}/>}
+        {tab==="set"   && <SettingsView store={store} setStore={updateStore} drive={drive}/>}
       </main>
 
       <button onClick={openAdd} className="fixed right-5 bottom-24 w-14 h-14 rounded-full shadow-lg grid place-items-center active:scale-95" style={{background:"var(--brand)",color:"white"}} aria-label="新增記帳">
