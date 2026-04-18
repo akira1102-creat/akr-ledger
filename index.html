@@ -225,8 +225,11 @@ function useGistSync(store, setStore) {
   const justImportedRef  = useRef(false); // skip debounce upload after cloud import
   const startupDoneRef   = useRef(false); // debounce waits for startup to finish
 
-  // ── Startup sync (once on mount) — uses _cloudSyncedAt embedded in Gist ──
-  // Separated from debounce to avoid cancellation race condition
+  // ── Startup sync (once on mount) ─────────────────────────────────────────
+  // Strategy: entry-level merge (never discard entries from either side).
+  // Cloud entries win on ID conflict; local-only entries are preserved.
+  // Settings/budgets: whichever device has the newer _lastModified wins.
+  // Result is always uploaded so cloud stays authoritative.
   useEffect(() => {
     if (!gistToken || !gistId) return;
     let alive = true;
@@ -235,41 +238,48 @@ function useGistSync(store, setStore) {
       try {
         setSyncing(true); setSyncError(null);
 
-        // Download cloud data + embedded timestamp
         const { storeData: cloudData, syncedAt: cloudSyncedAt, gistUpdatedAt } = await downloadGist(gistId, gistToken);
         if (!alive) return;
 
-        // Compare _lastModified (set only when entries/budgets actually change).
-        // This is unaffected by uploads, rate fetches, or category renames —
-        // so it reliably tells which device last made a real data change.
-        // Falls back to _cloudSyncedAt / gist.updated_at for old stores.
+        // ── Entry merge ──────────────────────────────────────────────────────
+        // Cloud entry wins on same ID (cloud is authoritative for edits).
+        // Local-only entries (not in cloud) are preserved → never lost on reload.
+        const cloudIds = new Set((cloudData.entries || []).map(e => e.id));
+        const localOnly = storeRef.current.entries.filter(e => !cloudIds.has(e.id));
+        const mergedEntries = [...(cloudData.entries || []), ...localOnly];
+
+        // ── Settings / budgets merge ─────────────────────────────────────────
+        // Use _lastModified to pick which device's settings/budgets to keep.
         const cloudModMs = dateToMs(cloudData._lastModified)
           || dateToMs(cloudSyncedAt) || dateToMs(gistUpdatedAt);
         const localModMs = dateToMs(storeRef.current._lastModified)
           || dateToMs(saved?.lastSync);
+        const cloudWins = cloudModMs >= localModMs;
 
-        if (cloudModMs > localModMs + 3000) {
-          // ☁️ Cloud is newer — silently import
-          if (cloudData && cloudData.entries) {
-            normalizeStore(cloudData);
-            justImportedRef.current = true;
-            if (alive) setStore(cloudData);
-          }
-        } else {
-          // 📱 Local is newest — upload to cloud
-          if (alive) await uploadGist(gistId, storeRef.current, gistToken);
-        }
+        const merged = {
+          ...(cloudWins ? cloudData : storeRef.current),
+          entries: mergedEntries,
+          _lastModified: cloudWins
+            ? (cloudData._lastModified || null)
+            : (storeRef.current._lastModified || null),
+        };
+        normalizeStore(merged);
+
+        // Apply merged store locally, then upload so cloud matches
+        justImportedRef.current = true;
+        if (alive) setStore(merged);
+        if (alive) await uploadGist(gistId, merged, gistToken);
 
         if (alive) {
           const now = new Date();
           setLastSync(now);
           persistState(gistToken, gistId, gistUser, now);
-          startupDoneRef.current = true; // signal debounce to take over
+          startupDoneRef.current = true;
         }
       } catch(e) {
         if (alive) setSyncError(e.message || "啟動同步失敗");
         console.error("StartupSync error:", e);
-        if (alive) startupDoneRef.current = true; // allow debounce even if startup failed
+        if (alive) startupDoneRef.current = true;
       } finally {
         if (alive) setSyncing(false);
       }
