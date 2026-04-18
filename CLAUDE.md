@@ -2,6 +2,18 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Output Rules (嚴格執行，每次回覆都適用)
+
+- 廣東話回覆（除非用戶用英文問）
+- 零廢話：無開場白、無結語、無"好的！"、無"我來幫你"、無"完成了！"
+- 唔好重複用戶講過嘅嘢
+- 唔好問"需要繼續嗎？"——明確任務直接做
+- 無解釋，除非用戶要求——淨係做
+- Markdown（headers/bullets/bold）只係喺需要列表或代碼時先用
+- Edit代替整個檔案重寫——只顯示改咗嘅部分
+- 答案夠晒一句就唔好寫段落
+- 唔好寫"我發現X個問題"之類嘅前言——直接列問題
+
 ## Project
 
 **AKR記帳本** — Zaim-style Traditional Chinese PWA expense tracker. Owner: Akira. Language: Cantonese/Traditional Chinese.
