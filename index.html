@@ -239,13 +239,13 @@ function useGistSync(store, setStore) {
         const { storeData: cloudData, syncedAt: cloudSyncedAt, gistUpdatedAt } = await downloadGist(gistId, gistToken);
         if (!alive) return;
 
-        // Compare user-edit timestamps, not upload timestamps.
-        // _localModifiedAt is set only on user actions (upsertEntry, settings changes, etc.)
-        // and is preserved on import — so it reliably reflects which device last changed data.
-        // Falls back to _cloudSyncedAt / gist.updated_at for stores predating this field.
-        const cloudModMs = dateToMs(cloudData._localModifiedAt)
+        // Compare _lastModified (set only when entries/budgets actually change).
+        // This is unaffected by uploads, rate fetches, or category renames —
+        // so it reliably tells which device last made a real data change.
+        // Falls back to _cloudSyncedAt / gist.updated_at for old stores.
+        const cloudModMs = dateToMs(cloudData._lastModified)
           || dateToMs(cloudSyncedAt) || dateToMs(gistUpdatedAt);
-        const localModMs = dateToMs(storeRef.current._localModifiedAt)
+        const localModMs = dateToMs(storeRef.current._lastModified)
           || dateToMs(saved?.lastSync);
 
         if (cloudModMs > localModMs + 3000) {
@@ -580,24 +580,15 @@ function App() {
     return { inc, exp, net };
   }, [monthEntries, rates, store.totalBudget]);
 
-  // updateStore: user-initiated changes — stamps _localModifiedAt so startup sync
-  // can compare "last user edit" instead of "last upload time" across devices
-  const updateStore = useCallback((fn) => {
-    setStore(prev => {
-      const next = typeof fn === 'function' ? fn(prev) : fn;
-      return { ...next, _localModifiedAt: new Date().toISOString() };
-    });
-  }, []);
-
   const upsertEntry = (entry) => {
-    updateStore(s => {
+    setStore(s => {
       const list = [...s.entries];
       const idx = list.findIndex(x=>x.id===entry.id);
       if (idx>=0) list[idx]=entry; else list.push(entry);
-      return {...s, entries:list};
+      return {...s, entries:list, _lastModified: new Date().toISOString()};
     });
   };
-  const removeEntry = (id) => updateStore(s => ({...s, entries:s.entries.filter(e=>e.id!==id)}));
+  const removeEntry = (id) => setStore(s => ({...s, entries:s.entries.filter(e=>e.id!==id), _lastModified: new Date().toISOString()}));
   const openAdd = () => { setEditing(null); setEntryOpen(true); };
   const openEdit = (e) => { setEditing(e); setEntryOpen(true); };
 
@@ -652,7 +643,7 @@ function App() {
         {tab==="home"  && <HomeView store={store} rates={rates} base={base} entries={monthEntries} onEdit={openEdit} onDelete={removeEntry} monthTotals={monthTotals} viewMonth={viewMonth} />}
         {tab==="cal"   && <CalendarView store={store} rates={rates} base={base} viewMonth={viewMonth} entries={monthEntries} onEdit={openEdit} />}
         {tab==="chart" && <ChartView store={store} rates={rates} base={base} entries={monthEntries} allEntries={store.entries} viewMonth={viewMonth} />}
-        {tab==="set"   && <SettingsView store={store} setStore={updateStore} drive={drive}/>}
+        {tab==="set"   && <SettingsView store={store} setStore={setStore} drive={drive}/>}
       </main>
 
       <button onClick={openAdd} className="fixed right-5 bottom-24 w-14 h-14 rounded-full shadow-lg grid place-items-center active:scale-95" style={{background:"var(--brand)",color:"white"}} aria-label="新增記帳">
@@ -1443,8 +1434,8 @@ function BudgetSettings({store, setStore}) {
   const budgets = store.budgets || {};
   const totalBudget = store.totalBudget || 0;
 
-  const setBudget = (id, val) => setStore(s=>({...s, budgets:{...s.budgets, [id]:parseFloat(val)||0}}));
-  const setTotalBudget = (val) => setStore(s=>({...s, totalBudget:parseFloat(val)||0}));
+  const setBudget = (id, val) => setStore(s=>({...s, budgets:{...s.budgets, [id]:parseFloat(val)||0}, _lastModified: new Date().toISOString()}));
+  const setTotalBudget = (val) => setStore(s=>({...s, totalBudget:parseFloat(val)||0, _lastModified: new Date().toISOString()}));
 
   const catBudgetSum = parentExpCats.reduce((sum,c)=>(budgets[c.id]||0)>0?sum+(budgets[c.id]||0):sum,0);
   const overAlloc = totalBudget>0 && catBudgetSum>totalBudget;
@@ -1619,7 +1610,7 @@ function DataSettings({store, setStore, drive}) {
           danger: true,
           onConfirm: () => {
             closeDialog();
-            setStore(imported);
+            setStore({...imported, _lastModified: new Date().toISOString()});
             flash("✅ 已匯入 " + count + " 筆資料");
           }
         });
@@ -1644,7 +1635,7 @@ function DataSettings({store, setStore, drive}) {
         danger: false,
         onConfirm: () => {
           closeDialog();
-          setStore(s=>({...s, entries:result.entries, categories:result.categories}));
+          setStore(s=>({...s, entries:result.entries, categories:result.categories, _lastModified: new Date().toISOString()}));
           flash("✅ 成功匯入 " + count + " 筆");
         }
       });
@@ -1660,7 +1651,7 @@ function DataSettings({store, setStore, drive}) {
       danger: true,
       onConfirm: () => {
         closeDialog();
-        setStore(defaultStore());
+        setStore({...defaultStore(), _lastModified: new Date().toISOString()});
         flash("🗑️ 已清除全部資料");
       }
     });
