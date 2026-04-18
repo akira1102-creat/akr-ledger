@@ -732,7 +732,10 @@ function HomeView({store, rates, base, entries, onEdit, onDelete, monthTotals, v
                   <span className="text-sm text-gray-500 font-medium">{label}</span>
                   {sub&&<span className="text-[10px] text-gray-300">{sub}</span>}
                 </div>
-                <span className={`text-lg font-bold amount-font ${over?"text-[color:var(--expense)]":"text-gray-800"}`}>{fmt(exp,base)}</span>
+                {has
+                  ? <span className={`text-lg font-bold amount-font ${over?"text-[color:var(--expense)]":"text-gray-800"}`}>{over?`-${fmt(Math.abs(remain),base)}`:fmt(remain,base)}</span>
+                  : <span className="text-lg font-bold amount-font text-gray-800">{fmt(exp,base)}</span>
+                }
               </div>
               {has&&(
                 <>
@@ -740,7 +743,7 @@ function HomeView({store, rates, base, entries, onEdit, onDelete, monthTotals, v
                     <div className="h-full rounded-full transition-all duration-300" style={{width:pct+"%",background:over?"var(--expense)":"#4CAF50"}}></div>
                   </div>
                   <div className={`text-[11px] ${over?"text-[color:var(--expense)] font-semibold":"text-gray-400"}`}>
-                    {over?`⚠️ 超出 ${fmt(Math.abs(remain),base)}`:`還可以用 ${fmt(remain,base)}`}
+                    {over?`⚠️ 已超出預算，已用 ${fmt(exp,base)}`:`已用 ${fmt(exp,base)}`}
                   </div>
                 </>
               )}
@@ -1724,18 +1727,6 @@ function DataSettings({store, setStore, drive}) {
         <div className="text-sm font-semibold mb-3">統計</div>
         <div className="text-sm text-gray-500">總記帳筆數：<span className="font-semibold text-gray-800">{store.entries.length}</span></div>
       </div>
-      <button onClick={()=>{
-        if(!confirm("清除 App 快取並重新載入？（記帳資料不受影響）")) return;
-        if("serviceWorker" in navigator){
-          navigator.serviceWorker.getRegistrations().then(regs=>{
-            Promise.all(regs.map(r=>r.unregister())).then(()=>{
-              caches.keys().then(keys=>Promise.all(keys.map(k=>caches.delete(k)))).then(()=>{
-                window.location.reload(true);
-              });
-            });
-          });
-        } else { window.location.reload(true); }
-      }} className="w-full py-3 rounded-xl text-sm font-medium text-blue-500 bg-blue-50">🔄 清除 App 快取並更新</button>
       <button onClick={clearAll} className="w-full py-3 rounded-xl text-sm font-medium text-red-500 bg-red-50">🗑️ 清除全部資料</button>
     </div>
     </>

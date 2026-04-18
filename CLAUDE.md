@@ -81,9 +81,6 @@ No OAuth — PAT stored in localStorage.
 
 **Hook API:** `{ gistToken, gistId, gistUser, lastSync, syncing, syncError, connect, disconnect, syncNow }`
 
-## Zaim CSV Import
-
-Cols: date(0), category(2), subcategory(3), currency(9), income(10), expense(11), transfer(12), amount(14). Skip if transfer > 0. Use col 14 as amount. Auto-create unknown categories: parent `📂`, child `📌`.
 
 ## CSS Variables
 
@@ -91,7 +88,7 @@ Cols: date(0), category(2), subcategory(3), currency(9), income(10), expense(11)
 --brand: #FF6B8A; --brand-soft: #FFF0F3; --income: #2ECC71; --expense: #E74C3C;
 ```
 
-## SW Cache (`sw.js`) — current: `akr-ledger-v5`
+## SW Cache (`sw.js`) — current: `akr-ledger-v6`
 
 HTML: network-first · static: cache-first · CDN: stale-while-revalidate
 
