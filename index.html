@@ -29,6 +29,14 @@
   .sheet { animation: slideUp .25s cubic-bezier(.32,.72,0,1); }
   input[type=number]::-webkit-outer-spin-button,
   input[type=number]::-webkit-inner-spin-button { -webkit-appearance:none; }
+  @keyframes slideDown { from { transform:translateY(0); } to { transform:translateY(110%); } }
+  .sheet-exit { animation: slideDown .24s cubic-bezier(.32,.72,0,1) forwards; }
+  @keyframes slideInRight { from { transform:translateX(36px); opacity:0; } to { transform:translateX(0); opacity:1; } }
+  @keyframes slideInLeft { from { transform:translateX(-36px); opacity:0; } to { transform:translateX(0); opacity:1; } }
+  .tab-slide-right { animation: slideInRight .2s ease; }
+  .tab-slide-left { animation: slideInLeft .2s ease; }
+  @keyframes fadeOut { from { opacity:1; } to { opacity:0; pointer-events:none; } }
+  .fade-out { animation: fadeOut .22s ease forwards; }
 </style>
 </head>
 <body>
@@ -551,6 +559,13 @@ function SortableList({ items, renderItem, onReorder, itemHeight = 68 }) {
 function App() {
   const [store, setStore] = useState(loadStore);
   const [tab, setTab] = useState("home");
+  const [tabDir, setTabDir] = useState(0);
+  const TAB_ORDER = ["home","cal","chart","set"];
+  const changeTab = (newTab) => {
+    if(newTab===tab) return;
+    setTabDir(TAB_ORDER.indexOf(newTab)>TAB_ORDER.indexOf(tab)?1:-1);
+    setTab(newTab);
+  };
   const [entryOpen, setEntryOpen] = useState(false);
   const [editing, setEditing] = useState(null);
   const [viewMonth, setViewMonth] = useState(() => { const d=new Date(); return monthKey(d); });
@@ -636,11 +651,13 @@ function App() {
         </div>
       </header>
 
-      <main className="safe-bottom">
-        {tab==="home"  && <HomeView store={store} rates={rates} base={base} entries={monthEntries} onEdit={openEdit} onDelete={removeEntry} monthTotals={monthTotals} viewMonth={viewMonth} />}
-        {tab==="cal"   && <CalendarView store={store} rates={rates} base={base} viewMonth={viewMonth} entries={monthEntries} onEdit={openEdit} />}
-        {tab==="chart" && <ChartView store={store} rates={rates} base={base} entries={monthEntries} allEntries={store.entries} viewMonth={viewMonth} onEdit={openEdit} />}
-        {tab==="set"   && <SettingsView store={store} setStore={setStore} drive={drive}/>}
+      <main className="safe-bottom" style={{overflow:"hidden"}}>
+        <div key={tab} className={tabDir>0?"tab-slide-right":tabDir<0?"tab-slide-left":""}>
+          {tab==="home"  && <HomeView store={store} rates={rates} base={base} entries={monthEntries} onEdit={openEdit} onDelete={removeEntry} monthTotals={monthTotals} viewMonth={viewMonth} />}
+          {tab==="cal"   && <CalendarView store={store} rates={rates} base={base} viewMonth={viewMonth} entries={monthEntries} onEdit={openEdit} />}
+          {tab==="chart" && <ChartView store={store} rates={rates} base={base} entries={monthEntries} allEntries={store.entries} viewMonth={viewMonth} onEdit={openEdit} />}
+          {tab==="set"   && <SettingsView store={store} setStore={setStore} drive={drive}/>}
+        </div>
       </main>
 
       <button onClick={openAdd} className="fixed right-5 bottom-24 w-14 h-14 rounded-full shadow-lg grid place-items-center active:scale-95" style={{background:"var(--brand)",color:"white"}} aria-label="新增記帳">
@@ -649,10 +666,10 @@ function App() {
 
       <nav className="fixed bottom-0 inset-x-0 bg-white border-t border-gray-100 z-10">
         <div className="grid grid-cols-4 h-16" style={{paddingBottom:"env(safe-area-inset-bottom)"}}>
-          <TabBtn active={tab==="home"}  onClick={()=>setTab("home")}  icon="🏠" label="首頁" />
-          <TabBtn active={tab==="cal"}   onClick={()=>setTab("cal")}   icon="📅" label="月曆" />
-          <TabBtn active={tab==="chart"} onClick={()=>setTab("chart")} icon="📊" label="圖表" />
-          <TabBtn active={tab==="set"}   onClick={()=>setTab("set")}   icon="⚙️" label="設定" />
+          <TabBtn active={tab==="home"}  onClick={()=>changeTab("home")}  icon="🏠" label="首頁" />
+          <TabBtn active={tab==="cal"}   onClick={()=>changeTab("cal")}   icon="📅" label="月曆" />
+          <TabBtn active={tab==="chart"} onClick={()=>changeTab("chart")} icon="📊" label="圖表" />
+          <TabBtn active={tab==="set"}   onClick={()=>changeTab("set")}   icon="⚙️" label="設定" />
         </div>
       </nav>
 
@@ -960,6 +977,7 @@ function ChartView({store, rates, base, entries, allEntries, viewMonth, onEdit})
   const [period, setPeriod] = useState("month");
   const [selectedCatId, setSelectedCatId] = useState(null);
   const [selectedChildId, setSelectedChildId] = useState(null);
+  const [panelClosing, setPanelClosing] = useState(false);
   const now = new Date();
 
   const { rangeLabel, rangeEntries } = useMemo(()=>{
@@ -1176,13 +1194,17 @@ function ChartView({store, rates, base, entries, allEntries, viewMonth, onEdit})
       const panelCatId=selectedChildId||(childExpData.length===0?selectedCatId:null);
       const panelCat=panelCatId?allCatMap[panelCatId]:null;
       const closePanel=()=>{
-        if(selectedChildId){setSelectedChildId(null);}
-        else{setSelectedCatId(null);setSelectedChildId(null);}
+        setPanelClosing(true);
+        setTimeout(()=>{
+          setPanelClosing(false);
+          if(selectedChildId){setSelectedChildId(null);}
+          else{setSelectedCatId(null);setSelectedChildId(null);}
+        },230);
       };
-      if(!panelCat) return null;
+      if(!panelCat&&!panelClosing) return null;
       return (
-        <div className="fixed inset-0 z-30 bg-black/30 fade-in flex items-end" onClick={closePanel}>
-          <div className="sheet bg-white w-full rounded-t-3xl max-h-[75vh] flex flex-col" onClick={e=>e.stopPropagation()}>
+        <div className={`fixed inset-0 z-30 bg-black/30 flex items-end ${panelClosing?"fade-out":"fade-in"}`} onClick={closePanel}>
+          <div className={`bg-white w-full rounded-t-3xl max-h-[75vh] flex flex-col ${panelClosing?"sheet-exit":"sheet"}`} onClick={e=>e.stopPropagation()}>
             <div className="px-4 py-3 flex items-center justify-between border-b border-gray-100 flex-shrink-0">
               <div className="flex items-center gap-2">
                 <span className="w-8 h-8 rounded-full grid place-items-center text-base" style={{background:panelCat.color+"55"}}>{panelCat.icon}</span>
@@ -1320,20 +1342,28 @@ function AboutView() {
 
 function SettingsView({store, setStore, drive}) {
   const [tab, setTab] = useState("cat");
+  const [tabDir, setTabDir] = useState(0);
   const tabs = [["cat","分類"],["budget","預算"],["data","數據"],["basic","幣值"],["about","關於"]];
+  const changeSettingsTab = (k) => {
+    if(k===tab) return;
+    setTabDir(tabs.findIndex(t=>t[0]===k)>tabs.findIndex(t=>t[0]===tab)?1:-1);
+    setTab(k);
+  };
   return (
     <div className="px-3 pt-3 space-y-3">
       <div className="bg-white rounded-2xl shadow-sm p-1 flex gap-1">
         {tabs.map(([k,l])=>(
-          <button key={k} onClick={()=>setTab(k)}
+          <button key={k} onClick={()=>changeSettingsTab(k)}
             className={`flex-1 py-1 rounded-xl text-[11px] leading-tight ${tab===k?"bg-[color:var(--brand-soft)] text-[color:var(--brand)] font-semibold":"text-gray-500"}`}>{l}</button>
         ))}
       </div>
-      {tab==="cat"    && <CatSettings store={store} setStore={setStore}/>}
-      {tab==="budget" && <BudgetSettings store={store} setStore={setStore}/>}
-      {tab==="data"   && <DataSettings store={store} setStore={setStore} drive={drive}/>}
-      {tab==="basic"  && <BasicSettings store={store} setStore={setStore}/>}
-      {tab==="about"  && <AboutView/>}
+      <div key={tab} className={tabDir>0?"tab-slide-right":tabDir<0?"tab-slide-left":""}>
+        {tab==="cat"    && <CatSettings store={store} setStore={setStore}/>}
+        {tab==="budget" && <BudgetSettings store={store} setStore={setStore}/>}
+        {tab==="data"   && <DataSettings store={store} setStore={setStore} drive={drive}/>}
+        {tab==="basic"  && <BasicSettings store={store} setStore={setStore}/>}
+        {tab==="about"  && <AboutView/>}
+      </div>
     </div>
   );
 }
@@ -1817,6 +1847,8 @@ function DataSettings({store, setStore, drive}) {
 
 /* ===================== 記帳 Modal ===================== */
 function EntryModal({entry, store, base, rates, onSave, onDelete, onClose}) {
+  const [exiting, setExiting] = React.useState(false);
+  const handleClose = React.useCallback(()=>{ setExiting(true); setTimeout(onClose,230); },[onClose]);
   const isEdit = !!entry;
   const today = toISO(new Date());
   const [type, setType] = useState(entry?.type || "expense");
@@ -1857,10 +1889,10 @@ function EntryModal({entry, store, base, rates, onSave, onDelete, onClose}) {
   };
 
   return (
-    <div className="fixed inset-0 z-40 bg-white flex flex-col">
+    <div className={`fixed inset-0 z-40 bg-white flex flex-col sheet ${exiting?"sheet-exit":""}`}>
       {/* Header */}
       <div className="px-4 py-4 flex items-center justify-between border-b border-gray-100 flex-shrink-0">
-        <button onClick={onClose} className="text-sm text-gray-400">取消</button>
+        <button onClick={handleClose} className="text-sm text-gray-400">取消</button>
         <div className="text-base font-semibold">{isEdit?"編輯記帳":"新增記帳"}</div>
         <button onClick={save} className="text-sm font-semibold" style={{color:"var(--brand)"}}>確定</button>
       </div>
