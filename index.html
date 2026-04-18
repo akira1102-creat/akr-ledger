@@ -40,10 +40,11 @@ const { useState, useEffect, useMemo, useRef, useCallback } = React;
 const CURRENCIES = [
   { code:"MOP", symbol:"MOP$" },
   { code:"HKD", symbol:"HK$" },
+  { code:"CNY", symbol:"CN¥" },
   { code:"JPY", symbol:"¥" },
   { code:"TWD", symbol:"NT$" },
 ];
-const DEFAULT_RATES = { MOP: 1, HKD: 1.03, JPY: 0.055, TWD: 0.25 };
+const DEFAULT_RATES = { MOP: 1, HKD: 1.03, CNY: 1.11, JPY: 0.055, TWD: 0.25 };
 
 // ===================== GitHub Gist Sync =====================
 const GIST_STATE_KEY = "akr-gist-state";
@@ -1287,7 +1288,7 @@ function BasicSettings({store, setStore}) {
     <div className="space-y-3">
       <div className="bg-white rounded-2xl shadow-sm p-4">
         <div className="text-sm font-semibold mb-3">主要幣值</div>
-        <div className="grid grid-cols-4 gap-2">
+        <div className="grid grid-cols-5 gap-2">
           {CURRENCIES.map(c=>(
             <button key={c.code} onClick={()=>setBase(c.code)}
               className={`py-2 rounded-xl text-xs font-medium ${base===c.code?"text-white":"bg-gray-100 text-gray-600"}`}
