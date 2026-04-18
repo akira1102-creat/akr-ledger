@@ -1751,9 +1751,16 @@ function EntryModal({entry, store, base, rates, onSave, onDelete, onClose}) {
   const [currency, setCurrency] = useState(entry?.currency || base);
   const [date, setDate] = useState(entry?.date || today);
   const [memo, setMemo] = useState(entry?.memo || "");
-  const [catTab, setCatTab] = useState(null);
+  // 初始展開：編輯模式時還原子分類所屬的父分類
+  const [catTab, setCatTab] = useState(()=>{
+    if (!entry?.category) return null;
+    const allCats=[...(store.categories.expense||[]),...(store.categories.income||[])];
+    const ec=allCats.find(c=>c.id===entry.category);
+    return ec?.parentId||null;
+  });
   const inputRef = useRef(null);
   const memoRef = useRef(null);
+  const scrollRef = useRef(null);
 
   // 只喺桌面（滑鼠裝置）自動 focus 金額欄；手機先唔自動彈鍵盤，否則鍵盤一彈視窗縮細 modal 內容消失
   useEffect(()=>{
@@ -1789,7 +1796,7 @@ function EntryModal({entry, store, base, rates, onSave, onDelete, onClose}) {
           <button onClick={save} className="text-sm font-semibold" style={{color:"var(--brand)"}}>確定</button>
         </div>
 
-        <div className="overflow-y-auto flex-1 min-h-0 no-scrollbar px-4 py-3 space-y-4">
+        <div ref={scrollRef} className="overflow-y-auto flex-1 min-h-0 no-scrollbar px-4 py-3 space-y-4">
           {/* 收支切換 */}
           <div className="flex gap-2">
             {[["expense","支出","var(--expense)"],["income","收入","var(--income)"]].map(([t,l,c])=>(
@@ -1850,7 +1857,7 @@ function EntryModal({entry, store, base, rates, onSave, onDelete, onClose}) {
                   <div className="text-[10px] font-semibold mb-2" style={{color:parent.color}}>{parent.icon} {parent.name} 的子分類</div>
                   <div className="grid grid-cols-4 gap-2">
                     {children.map(c=>(
-                      <button key={c.id} onClick={()=>{setCategory(c.id);setCatTab(null);}}
+                      <button key={c.id} onClick={()=>setCategory(c.id)}
                         className={`flex flex-col items-center py-2 rounded-xl text-xs transition-all ${category===c.id?"text-white shadow-md":""}`}
                         style={{background:category===c.id?c.color+"CC":"#fff"}}>
                         <span className="text-lg mb-0.5">{c.icon}</span>
@@ -1874,7 +1881,10 @@ function EntryModal({entry, store, base, rates, onSave, onDelete, onClose}) {
           <div>
             <div className="text-sm text-gray-500 mb-2">備注</div>
             <input ref={memoRef} type="text" value={memo} onChange={e=>setMemo(e.target.value)} placeholder="選填"
-              onFocus={()=>setTimeout(()=>memoRef.current?.scrollIntoView({behavior:"smooth",block:"nearest"}),300)}
+              onFocus={()=>setTimeout(()=>{
+                const el=memoRef.current, c=scrollRef.current;
+                if(el&&c){ const diff=el.getBoundingClientRect().bottom - c.getBoundingClientRect().bottom; if(diff>0) c.scrollTop+=diff+16; }
+              },350)}
               className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm"/>
           </div>
 
