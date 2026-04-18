@@ -725,9 +725,9 @@ function App() {
           store={store}
           base={base}
           rates={rates}
-          onSave={e=>{upsertEntry(e);setEntryOpen(false);}}
-          onDelete={id=>{removeEntry(id);setEntryOpen(false);}}
-          onClose={()=>setEntryOpen(false)}
+          onSave={e=>{upsertEntry(e);setEntryOpen(false);setEntryCloseSignal(0);}}
+          onDelete={id=>{removeEntry(id);setEntryOpen(false);setEntryCloseSignal(0);}}
+          onClose={()=>{setEntryOpen(false);setEntryCloseSignal(0);}}
           closeSignal={entryCloseSignal}
         />
       )}
