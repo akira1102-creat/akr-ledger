@@ -1210,7 +1210,7 @@ function AboutView() {
           <div className="w-full space-y-3">
             <div className="flex justify-between items-center py-3 border-b border-gray-100">
               <span className="text-sm text-gray-500">版本</span>
-              <span className="text-sm font-semibold text-gray-800">v1.0.260417</span>
+              <span className="text-sm font-semibold text-gray-800">v1.0.260418</span>
             </div>
             <div className="flex justify-between items-center py-3 border-b border-gray-100">
               <span className="text-sm text-gray-500">製作者</span>
@@ -1233,8 +1233,8 @@ function AboutView() {
 }
 
 function SettingsView({store, setStore, drive}) {
-  const [tab, setTab] = useState("basic");
-  const tabs = [["basic","幣值"],["cat","分類"],["budget","預算"],["data","數據"],["about","關於"]];
+  const [tab, setTab] = useState("cat");
+  const tabs = [["cat","分類"],["budget","預算"],["data","數據"],["basic","幣值"],["about","關於"]];
   return (
     <div className="px-3 pt-3 space-y-3">
       <div className="bg-white rounded-2xl shadow-sm p-1 flex gap-1">
@@ -1243,10 +1243,10 @@ function SettingsView({store, setStore, drive}) {
             className={`flex-1 py-1 rounded-xl text-[11px] leading-tight ${tab===k?"bg-[color:var(--brand-soft)] text-[color:var(--brand)] font-semibold":"text-gray-500"}`}>{l}</button>
         ))}
       </div>
-      {tab==="basic"  && <BasicSettings store={store} setStore={setStore}/>}
       {tab==="cat"    && <CatSettings store={store} setStore={setStore}/>}
       {tab==="budget" && <BudgetSettings store={store} setStore={setStore}/>}
       {tab==="data"   && <DataSettings store={store} setStore={setStore} drive={drive}/>}
+      {tab==="basic"  && <BasicSettings store={store} setStore={setStore}/>}
       {tab==="about"  && <AboutView/>}
     </div>
   );
@@ -1331,6 +1331,30 @@ function CatSettings({store, setStore}) {
   const updateCat = (id, field, val) =>
     setStore(s=>({...s, categories:{...s.categories, [type]:s.categories[type].map(c=>c.id===id?{...c,[field]:val}:c)}}));
 
+  const addParent = () => {
+    const id = "cat_"+type+"_"+Date.now();
+    const color = CSV_CAT_COLORS[parentCats.length % CSV_CAT_COLORS.length];
+    const newCat = {id, name:"新分類", icon:"📁", color};
+    setStore(s=>({...s, categories:{...s.categories, [type]:[...s.categories[type], newCat]}}));
+  };
+
+  const deleteParent = (id) => {
+    setStore(s => {
+      const newBudgets = {...s.budgets};
+      delete newBudgets[id];
+      return {...s, categories:{...s.categories, [type]:s.categories[type].filter(c=>c.id!==id&&c.parentId!==id)}, budgets:newBudgets};
+    });
+  };
+
+  const addChild = (parentId, parentColor) => {
+    const id = "cat_"+type+"_c_"+Date.now();
+    const newCat = {id, name:"新子分類", icon:"📌", color:parentColor, parentId};
+    setStore(s=>({...s, categories:{...s.categories, [type]:[...s.categories[type], newCat]}}));
+  };
+
+  const deleteChild = (id) =>
+    setStore(s=>({...s, categories:{...s.categories, [type]:s.categories[type].filter(c=>c.id!==id)}}));
+
   const reorderParents = (from, to) => {
     setStore(s => {
       const all = [...s.categories[type]];
@@ -1338,7 +1362,6 @@ function CatSettings({store, setStore}) {
       const children = all.filter(c=>c.parentId);
       const moved = parents.splice(from, 1)[0];
       parents.splice(to, 0, moved);
-      // Rebuild: interleave parents with their children
       const result = [];
       parents.forEach(p => {
         result.push(p);
@@ -1369,7 +1392,7 @@ function CatSettings({store, setStore}) {
             className={`flex-1 py-1.5 rounded-xl text-sm ${type===t?"bg-[color:var(--brand-soft)] text-[color:var(--brand)] font-semibold":"bg-gray-100 text-gray-500"}`}>{l}</button>
         ))}
       </div>
-      <div className="text-[11px] text-gray-400 px-1">點擊 Icon／名稱可修改；長按 ☰ 可拖拉排序</div>
+      <div className="text-[11px] text-gray-400 px-1">點擊 Icon／名稱可修改；長按 ☰ 拖拉排序；🗑️ 刪除</div>
       <SortableList
         items={parentCats}
         itemHeight={60}
@@ -1378,6 +1401,7 @@ function CatSettings({store, setStore}) {
           const children=cats.filter(c=>c.parentId===parent.id);
           return (
             <div className={`bg-white rounded-2xl shadow-sm overflow-hidden mb-2 ${drag.isDragging?"ring-2 ring-[color:var(--brand)]":""}`}>
+              {/* 第一層分類 */}
               <div className="px-3 py-2.5 flex items-center gap-3 bg-gray-50">
                 <div
                   onPointerDown={drag.handlePointerDown}
@@ -1391,8 +1415,11 @@ function CatSettings({store, setStore}) {
                 </div>
                 <input type="text" value={parent.name} onChange={e=>updateCat(parent.id,"name",e.target.value.slice(0,10))}
                   className="flex-1 font-semibold text-sm bg-transparent border-0 outline-none"/>
-                <span className="text-[10px] text-gray-400 flex-shrink-0">{children.length>0?`${children.length}項`:"無子項"}</span>
+                <span className="text-[10px] text-gray-400 flex-shrink-0 mr-1">{children.length>0?`${children.length}項`:""}</span>
+                <button onClick={()=>deleteParent(parent.id)}
+                  className="text-gray-300 hover:text-red-400 text-base flex-shrink-0 px-1 active:scale-90 transition-transform">🗑️</button>
               </div>
+              {/* 第二層分類 */}
               {children.length>0&&(
                 <SortableList
                   items={children}
@@ -1412,14 +1439,26 @@ function CatSettings({store, setStore}) {
                       </div>
                       <input type="text" value={c.name} onChange={e=>updateCat(c.id,"name",e.target.value.slice(0,10))}
                         className="flex-1 text-sm bg-gray-50 rounded-lg px-2.5 py-1.5"/>
+                      <button onClick={()=>deleteChild(c.id)}
+                        className="text-gray-300 hover:text-red-400 text-sm flex-shrink-0 px-1 active:scale-90 transition-transform">🗑️</button>
                     </div>
                   )}
                 />
               )}
+              {/* 新增子分類按鈕 */}
+              <button onClick={()=>addChild(parent.id, parent.color)}
+                className="w-full py-2 text-xs text-gray-400 hover:text-[color:var(--brand)] border-t border-gray-50 flex items-center justify-center gap-1 active:bg-gray-50">
+                <span className="text-base leading-none">＋</span> 新增子分類
+              </button>
             </div>
           );
         }}
       />
+      {/* 新增第一層分類按鈕 */}
+      <button onClick={addParent}
+        className="w-full py-3 rounded-2xl border-2 border-dashed border-gray-200 text-sm text-gray-400 hover:border-[color:var(--brand)] hover:text-[color:var(--brand)] flex items-center justify-center gap-2 active:bg-gray-50">
+        <span className="text-lg leading-none">＋</span> 新增分類
+      </button>
     </div>
   );
 }
