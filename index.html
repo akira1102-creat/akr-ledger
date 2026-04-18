@@ -112,7 +112,7 @@ function useGistSync(store, setStore) {
     return null;
   };
 
-  // ── Download gist (returns { storeData, syncedAt }) ──────────────────────
+  // ── Download gist (returns { storeData, syncedAt, gistUpdatedAt }) ────────
   const downloadGist = async (id, tok) => {
     const gist = await ghFetch(`/gists/${id}`, {}, tok);
     const file = gist.files[GIST_FILENAME];
@@ -122,7 +122,11 @@ function useGistSync(store, setStore) {
       : file.content;
     const parsed = JSON.parse(content);
     const { _cloudSyncedAt, ...storeData } = parsed; // strip metadata
-    return { storeData, syncedAt: _cloudSyncedAt || null };
+    return {
+      storeData,
+      syncedAt: _cloudSyncedAt || null,   // embedded timestamp (new gists)
+      gistUpdatedAt: gist.updated_at || null, // GitHub's own updated_at (fallback for old gists)
+    };
   };
 
   // ── Upload (patch) gist — embeds _cloudSyncedAt for cross-device comparison
@@ -232,18 +236,22 @@ function useGistSync(store, setStore) {
         setSyncing(true); setSyncError(null);
 
         // Download cloud data + embedded timestamp
-        const { storeData: cloudData, syncedAt: cloudSyncedAt } = await downloadGist(gistId, gistToken);
+        const { storeData: cloudData, syncedAt: cloudSyncedAt, gistUpdatedAt } = await downloadGist(gistId, gistToken);
         if (!alive) return;
 
-        // Compare: _cloudSyncedAt (set when another device uploaded) vs our lastSync
-        const cloudMs = cloudSyncedAt ? new Date(cloudSyncedAt).getTime() : 0;
+        // Compare timestamps — prefer _cloudSyncedAt (embedded, reliable)
+        // Fall back to gist.updated_at for old gists that predate _cloudSyncedAt
+        const cloudMs = cloudSyncedAt
+          ? new Date(cloudSyncedAt).getTime()
+          : gistUpdatedAt ? new Date(gistUpdatedAt).getTime() : 0;
         // Use saved.lastSync (initial localStorage value) — avoids stale closure issues
-        const localMs  = saved?.lastSync ? new Date(saved.lastSync).getTime() : 0;
+        const localMs = saved?.lastSync ? new Date(saved.lastSync).getTime() : 0;
 
         if (cloudMs > localMs + 3000) {
           // ☁️ Cloud is newer — silently import
           if (cloudData && cloudData.entries) {
             if (!cloudData.totalBudget) cloudData.totalBudget = 0;
+            if (!cloudData.budgets) cloudData.budgets = {};
             justImportedRef.current = true;
             if (alive) setStore(cloudData);
           }
@@ -373,6 +381,7 @@ const loadStore = () => {
     if (!raw) return defaultStore();
     const s = JSON.parse(raw);
     if (!s.totalBudget) s.totalBudget = 0;
+    if (!s.budgets) s.budgets = {};
     if (!s.categories?.expense) s.categories = defaultStore().categories;
     return s;
   } catch { return defaultStore(); }
@@ -1751,15 +1760,16 @@ function EntryModal({entry, store, base, rates, onSave, onDelete, onClose}) {
           </div>
 
           {/* 金額 */}
-          <div className="bg-gray-50 rounded-2xl p-4">
-            <div className="flex items-center gap-3">
+          <div className="bg-gray-50 rounded-2xl p-4 overflow-hidden">
+            <div className="flex items-center gap-3 min-w-0">
               <select value={currency} onChange={e=>setCurrency(e.target.value)}
-                className="bg-white border border-gray-200 rounded-xl px-3 py-2 text-sm font-medium">
+                className="flex-shrink-0 bg-white border border-gray-200 rounded-xl px-3 py-2 text-sm font-medium">
                 {CURRENCIES.map(c=><option key={c.code} value={c.code}>{c.code}</option>)}
               </select>
               <input ref={inputRef} type="number" value={amount} placeholder="0.0" step="0.1" min="0"
                 onChange={e=>setAmount(e.target.value)}
-                className="flex-1 bg-transparent text-3xl font-bold text-right outline-none placeholder-gray-300"/>
+                className="min-w-0 flex-1 bg-transparent font-bold text-right outline-none placeholder-gray-300"
+                style={{fontSize: amount.length > 10 ? "1.5rem" : amount.length > 7 ? "2rem" : "1.875rem"}}/>
             </div>
             {currency!==base&&amount&&(
               <div className="text-xs text-gray-400 text-right mt-1">≈ {fmt(convertedBase,base)}</div>
