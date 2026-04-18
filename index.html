@@ -1,0 +1,1834 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+<meta name="theme-color" content="#FF6B8A" />
+<link rel="manifest" href="manifest.json" />
+<title>AKR記帳本</title>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  :root {
+    --brand: #FF6B8A;
+    --brand-soft: #FFF0F3;
+    --income: #2ECC71;
+    --expense: #E74C3C;
+  }
+  * { -webkit-tap-highlight-color: transparent; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #F8F9FA; }
+  .amount-font { font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+  .safe-bottom { padding-bottom: calc(80px + env(safe-area-inset-bottom)); }
+  .no-scrollbar::-webkit-scrollbar { display: none; }
+  .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+  @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
+  .fade-in { animation: fadeIn .2s ease; }
+  @keyframes slideUp { from { transform:translateY(100%); } to { transform:translateY(0); } }
+  .sheet { animation: slideUp .25s cubic-bezier(.32,.72,0,1); }
+  input[type=number]::-webkit-outer-spin-button,
+  input[type=number]::-webkit-inner-spin-button { -webkit-appearance:none; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useMemo, useRef, useCallback } = React;
+
+/* ===================== 常數 ===================== */
+const CURRENCIES = [
+  { code:"MOP", symbol:"MOP$" },
+  { code:"HKD", symbol:"HK$" },
+  { code:"JPY", symbol:"¥" },
+  { code:"TWD", symbol:"NT$" },
+];
+const DEFAULT_RATES = { MOP: 1, HKD: 1.03, JPY: 0.055, TWD: 0.25 };
+
+// ===================== GitHub Gist Sync =====================
+const GIST_STATE_KEY = "akr-gist-state";
+const GIST_FILENAME  = "akr-ledger.json";
+const GH_API         = "https://api.github.com";
+
+function useGistSync(store, setStore) {
+  const loadSaved = () => { try { return JSON.parse(localStorage.getItem(GIST_STATE_KEY)||"null"); } catch { return null; } };
+  const saved = loadSaved();
+
+  const [gistToken, setGistToken] = useState(saved?.token  || null);
+  const [gistId,    setGistId]    = useState(saved?.gistId || null);
+  const [gistUser,  setGistUser]  = useState(saved?.user   || null);
+  const [lastSync,  setLastSync]  = useState(saved?.lastSync ? new Date(saved.lastSync) : null);
+  const [syncing,   setSyncing]   = useState(false);
+  const [syncError, setSyncError] = useState(null);
+
+  const storeRef = useRef(store);
+  useEffect(() => { storeRef.current = store; }, [store]);
+
+  const persistState = (tok, id, user, sync) => {
+    try {
+      localStorage.setItem(GIST_STATE_KEY, JSON.stringify({
+        token: tok, gistId: id, user, lastSync: sync ? sync.toISOString() : null
+      }));
+    } catch(e) {}
+  };
+
+  // ── GitHub API helper ─────────────────────────────────────────────────────
+  const ghFetch = async (path, opts = {}, tok = null) => {
+    const token = tok || gistToken;
+    if (!token) throw new Error("尚未設定 Token");
+    const res = await fetch(GH_API + path, {
+      ...opts,
+      headers: {
+        "Authorization": "token " + token,
+        "Accept": "application/vnd.github.v3+json",
+        "Content-Type": "application/json",
+        ...(opts.headers || {}),
+      },
+    });
+    if (!res.ok) {
+      const errText = await res.text().catch(() => "");
+      if (res.status === 401) {
+        setGistToken(null);
+        persistState(null, gistId, gistUser, lastSync);
+        throw new Error("Token 無效或已撤銷，請重新輸入");
+      }
+      throw new Error("GitHub API " + res.status + ": " + errText.slice(0, 120));
+    }
+    if (res.status === 204) return null;
+    return res.json();
+  };
+
+  // ── Find existing gist ────────────────────────────────────────────────────
+  const findGist = async (tok) => {
+    let page = 1;
+    while (page <= 5) {
+      const list = await ghFetch(`/gists?per_page=100&page=${page}`, {}, tok);
+      if (!list || list.length === 0) break;
+      const found = list.find(g => g.files && g.files[GIST_FILENAME]);
+      if (found) return found.id;
+      if (list.length < 100) break;
+      page++;
+    }
+    return null;
+  };
+
+  // ── Download gist (returns { storeData, syncedAt }) ──────────────────────
+  const downloadGist = async (id, tok) => {
+    const gist = await ghFetch(`/gists/${id}`, {}, tok);
+    const file = gist.files[GIST_FILENAME];
+    if (!file) throw new Error("備份檔案不存在");
+    const content = file.truncated
+      ? await fetch(file.raw_url).then(r => r.text())
+      : file.content;
+    const parsed = JSON.parse(content);
+    const { _cloudSyncedAt, ...storeData } = parsed; // strip metadata
+    return { storeData, syncedAt: _cloudSyncedAt || null };
+  };
+
+  // ── Upload (patch) gist — embeds _cloudSyncedAt for cross-device comparison
+  const uploadGist = async (id, data, tok) => {
+    const payload = { ...data, _cloudSyncedAt: new Date().toISOString() };
+    await ghFetch(`/gists/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ files: { [GIST_FILENAME]: { content: JSON.stringify(payload) } } }),
+    }, tok);
+  };
+
+  // ── Create gist ───────────────────────────────────────────────────────────
+  const createGist = async (data, tok) => {
+    const res = await ghFetch("/gists", {
+      method: "POST",
+      body: JSON.stringify({
+        description: "AKR記帳本自動備份",
+        public: false,
+        files: { [GIST_FILENAME]: { content: JSON.stringify({ ...data, _cloudSyncedAt: new Date().toISOString() }) } },
+      }),
+    }, tok);
+    return res.id;
+  };
+
+  // ── Connect: validate token + find/create gist ────────────────────────────
+  const connect = async (token) => {
+    setSyncing(true);
+    setSyncError(null);
+    try {
+      const userRes = await ghFetch("/user", {}, token);
+      const user = { login: userRes.login, name: userRes.name || userRes.login };
+
+      const existingId = await findGist(token);
+
+      if (!existingId) {
+        const newId = await createGist(storeRef.current, token);
+        const now = new Date();
+        setGistToken(token); setGistId(newId); setGistUser(user); setLastSync(now);
+        startupDoneRef.current = true; // startup already handled by connect
+        persistState(token, newId, user, now);
+        alert("✅ 已建立雲端備份並啟用自動同步！\n\n換機時輸入同一 Token 即可恢復資料。");
+      } else {
+        const doImport = window.confirm(
+          "發現已有雲端備份資料。\n\n按「確定」→ 導入雲端資料（覆蓋本機）\n按「取消」→ 以本機資料覆蓋雲端"
+        );
+        if (doImport) {
+          const { storeData: cloudData } = await downloadGist(existingId, token);
+          if (!cloudData || !cloudData.entries) throw new Error("雲端資料格式無效");
+          if (!cloudData.totalBudget) cloudData.totalBudget = 0;
+          justImportedRef.current = true;
+          setStore(cloudData);
+        } else {
+          await uploadGist(existingId, storeRef.current, token);
+        }
+        const now = new Date();
+        setGistToken(token); setGistId(existingId); setGistUser(user); setLastSync(now);
+        startupDoneRef.current = true; // startup already handled by connect
+        persistState(token, existingId, user, now);
+        alert("✅ " + (doImport ? "已導入雲端資料，" : "已上傳本機資料，") + "自動同步已啟用！");
+      }
+    } catch(e) {
+      console.error("Connect error:", e);
+      setSyncError(e.message || "連接失敗");
+      alert("❌ 連接失敗：" + (e.message || "請確認 Token 是否正確，並確認已勾選 gist 權限"));
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  // ── Disconnect ────────────────────────────────────────────────────────────
+  const disconnect = () => {
+    if (!window.confirm("確定斷開雲端同步？（本機資料保留，雲端備份不刪除）")) return;
+    setGistToken(null); setGistId(null); setGistUser(null);
+    setLastSync(null); setSyncError(null);
+    startupDoneRef.current = false;
+    justImportedRef.current = false;
+    try { localStorage.removeItem(GIST_STATE_KEY); } catch(e) {}
+  };
+
+  // ── Manual sync ───────────────────────────────────────────────────────────
+  const syncNow = async () => {
+    if (!gistToken || !gistId) { alert("尚未連接雲端同步"); return; }
+    setSyncing(true); setSyncError(null);
+    try {
+      await uploadGist(gistId, storeRef.current, gistToken);
+      const now = new Date();
+      setLastSync(now);
+      persistState(gistToken, gistId, gistUser, now);
+    } catch(e) {
+      setSyncError(e.message);
+      console.error("SyncNow error:", e);
+    } finally { setSyncing(false); }
+  };
+
+  // ── Refs for sync coordination ────────────────────────────────────────────
+  const justImportedRef  = useRef(false); // skip debounce upload after cloud import
+  const startupDoneRef   = useRef(false); // debounce waits for startup to finish
+
+  // ── Startup sync (once on mount) — uses _cloudSyncedAt embedded in Gist ──
+  // Separated from debounce to avoid cancellation race condition
+  useEffect(() => {
+    if (!gistToken || !gistId) return;
+    let alive = true;
+
+    (async () => {
+      try {
+        setSyncing(true); setSyncError(null);
+
+        // Download cloud data + embedded timestamp
+        const { storeData: cloudData, syncedAt: cloudSyncedAt } = await downloadGist(gistId, gistToken);
+        if (!alive) return;
+
+        // Compare: _cloudSyncedAt (set when another device uploaded) vs our lastSync
+        const cloudMs = cloudSyncedAt ? new Date(cloudSyncedAt).getTime() : 0;
+        // Use saved.lastSync (initial localStorage value) — avoids stale closure issues
+        const localMs  = saved?.lastSync ? new Date(saved.lastSync).getTime() : 0;
+
+        if (cloudMs > localMs + 3000) {
+          // ☁️ Cloud is newer — silently import
+          if (cloudData && cloudData.entries) {
+            if (!cloudData.totalBudget) cloudData.totalBudget = 0;
+            justImportedRef.current = true;
+            if (alive) setStore(cloudData);
+          }
+        } else {
+          // 📱 Local is newest — upload to cloud
+          if (alive) await uploadGist(gistId, storeRef.current, gistToken);
+        }
+
+        if (alive) {
+          const now = new Date();
+          setLastSync(now);
+          persistState(gistToken, gistId, gistUser, now);
+          startupDoneRef.current = true; // signal debounce to take over
+        }
+      } catch(e) {
+        if (alive) setSyncError(e.message || "啟動同步失敗");
+        console.error("StartupSync error:", e);
+        if (alive) startupDoneRef.current = true; // allow debounce even if startup failed
+      } finally {
+        if (alive) setSyncing(false);
+      }
+    })();
+
+    return () => { alive = false; };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps — runs once on mount
+
+  // ── Debounce upload on store changes (after startup completes) ────────────
+  useEffect(() => {
+    if (!gistToken || !gistId) return;
+    if (!startupDoneRef.current) return; // wait for startup sync
+
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      if (cancelled) return;
+      if (justImportedRef.current) { justImportedRef.current = false; return; }
+      try {
+        setSyncing(true); setSyncError(null);
+        await uploadGist(gistId, storeRef.current, gistToken);
+        if (!cancelled) {
+          const now = new Date();
+          setLastSync(now);
+          persistState(gistToken, gistId, gistUser, now);
+        }
+      } catch(e) {
+        if (!cancelled) setSyncError(e.message || "同步失敗");
+        console.error("AutoSync error:", e);
+      } finally {
+        if (!cancelled) setSyncing(false);
+      }
+    }, 1500);
+
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [store, gistToken, gistId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return { gistToken, gistId, gistUser, lastSync, syncing, syncError, connect, disconnect, syncNow };
+}
+// ===================== End GitHub Gist Sync =====================
+
+
+const DEFAULT_EXPENSE_CATS = [
+  // 飲食
+  { id:"food",      name:"飲食",           icon:"🍜", color:"#FFB4A2" },
+  { id:"breakfast", name:"早餐",           icon:"🌅", color:"#FFB4A2", parentId:"food" },
+  { id:"lunch",     name:"午餐",           icon:"🍱", color:"#FFB4A2", parentId:"food" },
+  { id:"dinner",    name:"晚餐",           icon:"🍽️", color:"#FFB4A2", parentId:"food" },
+  { id:"drink",     name:"飲品",           icon:"🧋", color:"#9BD1E5", parentId:"food" },
+  { id:"snack",     name:"零食",           icon:"🍬", color:"#FFB4A2", parentId:"food" },
+  { id:"alcohol",   name:"酒類",           icon:"🍺", color:"#B5A6F5", parentId:"food" },
+  { id:"grocery",   name:"食材雜貨",       icon:"🥬", color:"#FFB4A2", parentId:"food" },
+  // 日常消費
+  { id:"daily",     name:"日常消費",       icon:"🛒", color:"#F7C873" },
+  { id:"transit",   name:"交通費",         icon:"🚆", color:"#9BD1E5", parentId:"daily" },
+  { id:"shop",      name:"服裝",           icon:"👕", color:"#F5A6C9", parentId:"daily" },
+  { id:"fun",       name:"娛樂",           icon:"🎮", color:"#B5A6F5", parentId:"daily" },
+  { id:"med",       name:"健康",           icon:"🏥", color:"#F29E9E", parentId:"daily" },
+  { id:"home",      name:"日常用品",       icon:"🧴", color:"#F7C873", parentId:"daily" },
+  { id:"edu",       name:"學習/工作用品",  icon:"📚", color:"#C9A0DC", parentId:"daily" },
+  { id:"pickup",    name:"取貨費",         icon:"📦", color:"#CBD5E1", parentId:"daily" },
+  // 人際社交
+  { id:"social",    name:"人際社交",       icon:"👥", color:"#F5A6C9" },
+  { id:"family",    name:"家人",           icon:"🏠", color:"#F5A6C9", parentId:"social" },
+  { id:"friend",    name:"朋友",           icon:"👫", color:"#F5A6C9", parentId:"social" },
+  { id:"coworker",  name:"同事",           icon:"🤝", color:"#F5A6C9", parentId:"social" },
+  // 水電雜費
+  { id:"util",      name:"水電雜費",       icon:"💡", color:"#A7E0A0" },
+  { id:"bill",      name:"電費",           icon:"⚡", color:"#A7E0A0", parentId:"util" },
+  { id:"water",     name:"水費",           icon:"💧", color:"#A7E0A0", parentId:"util" },
+  { id:"gasfee",    name:"煤氣費",         icon:"🔥", color:"#FF7043", parentId:"util" },
+  { id:"tel",       name:"通訊費",         icon:"📱", color:"#8BCEC2", parentId:"util" },
+  // 其他
+  { id:"other_e",   name:"其他",           icon:"💸", color:"#CBD5E1" },
+];
+const DEFAULT_INCOME_CATS = [
+  { id:"salary_g",  name:"薪酬",     icon:"💼", color:"#36B7C6" },
+  { id:"salary",    name:"月薪",     icon:"💰", color:"#36B7C6", parentId:"salary_g" },
+  { id:"bonus",     name:"獎金",     icon:"🎁", color:"#5AC8A6", parentId:"salary_g" },
+  { id:"misc_i",    name:"額外收入", icon:"✨", color:"#7BC67E" },
+  { id:"invest",    name:"投資",     icon:"📈", color:"#7BC67E", parentId:"misc_i" },
+  { id:"refund",    name:"退款",     icon:"💰", color:"#F2C94C", parentId:"misc_i" },
+  { id:"other_i",   name:"其他",     icon:"💵", color:"#CBD5E1", parentId:"misc_i" },
+];
+
+const weekdayZH = ["日","一","二","三","四","五","六"];
+const pad2 = n => String(n).padStart(2,"0");
+const toISO = d => `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;
+const parseISO = s => { const [y,m,d]=s.split("-").map(Number); return new Date(y,m-1,d); };
+const monthKey = d => `${d.getFullYear()}-${pad2(d.getMonth()+1)}`;
+const sameMonth = (iso, ym) => iso.startsWith(ym);
+const shiftMonth = (set, cur, delta) => {
+  const [y,m] = cur.split("-").map(Number);
+  const d = new Date(y, m-1+delta, 1);
+  set(monthKey(d));
+};
+
+/* ===================== 儲存 ===================== */
+const STORE_KEY = "zaim_store_v3";
+const defaultStore = () => ({
+  entries: [],
+  categories: { expense: DEFAULT_EXPENSE_CATS, income: DEFAULT_INCOME_CATS },
+  budgets: {},
+  totalBudget: 0,
+  settings: { baseCurrency:"MOP", rates: DEFAULT_RATES },
+});
+const loadStore = () => {
+  try {
+    const raw = localStorage.getItem(STORE_KEY);
+    if (!raw) return defaultStore();
+    const s = JSON.parse(raw);
+    if (!s.totalBudget) s.totalBudget = 0;
+    if (!s.categories?.expense) s.categories = defaultStore().categories;
+    return s;
+  } catch { return defaultStore(); }
+};
+const saveStore = s => { try { localStorage.setItem(STORE_KEY, JSON.stringify(s)); } catch {} };
+
+/* ===================== 金額格式化 ===================== */
+const toBase = (amount, currency, rates) => amount * (rates[currency] || 1);
+const fmt = (v, currency) => {
+  const cur = CURRENCIES.find(c=>c.code===currency) || CURRENCIES[0];
+  return `${cur.symbol} ${Math.abs(v).toLocaleString("en-US", {minimumFractionDigits:1, maximumFractionDigits:1})}`;
+};
+
+/* ===================== Zaim CSV 導入 ===================== */
+const CSV_CAT_COLORS = ["#FFB4A2","#9BD1E5","#F5A6C9","#B5A6F5","#F7C873","#A7E0A0","#F29E9E","#8BCEC2","#C9A0DC","#CBD5E1"];
+function parseCSVRow(line) {
+  const cols=[]; let cur="",inQ=false;
+  for(let i=0;i<line.length;i++){
+    const ch=line[i];
+    if(ch==='"'){inQ=!inQ;}
+    else if(ch===','&&!inQ){cols.push(cur.trim());cur="";}
+    else{cur+=ch;}
+  }
+  cols.push(cur.trim());
+  return cols;
+}
+function importZaimCSV(text, store) {
+  // Zaim CSV format:
+  // 日付(0), 方法(1), カテゴリ(2), カテゴリの内訳(3), 支払元(4), 入金先(5),
+  // 品目(6), メモ(7), お店(8), 通貨(9), 収入(10), 支出(11), 振替(12), 残高調整(13), ...
+  const lines = text.split(/\r?\n/).filter(l=>l.trim());
+  if (lines.length < 2) return null;
+  const newEntries = [];
+  const catColorMap = {};
+  let colorIdx = 0;
+  const expCats = [...store.categories.expense];
+  const incCats = [...store.categories.income];
+  let imported = 0;
+  for (let i=1;i<lines.length;i++) {
+    const cols = parseCSVRow(lines[i]);
+    if (cols.length < 12) continue;
+    const date     = cols[0];
+    const catName  = cols[2];
+    const subName  = cols[3];
+    const itemName = cols[6];
+    const memoStr  = cols[7];
+    const shopName = cols[8];
+    const currency = cols[9] || "MOP";
+    const incAmt   = parseFloat(cols[10]) || 0;
+    const expAmt   = parseFloat(cols[11]) || 0;
+    const transfer = parseFloat(cols[12]) || 0;
+
+    // Skip transfer/adjustment entries
+    if (transfer > 0) continue;
+    if (incAmt === 0 && expAmt === 0) continue;
+
+    const entryType = incAmt > 0 ? "income" : "expense";
+    const amount    = entryType === "income" ? incAmt : expAmt;
+    // memo = itemName or memoStr or shopName
+    const memo = [itemName, memoStr, shopName].filter(s=>s&&s!=="-"&&s!=="").join(" ").trim();
+
+    const cats = entryType==="income" ? incCats : expCats;
+    // Match parent category by name
+    let parentCat = cats.find(c=>!c.parentId && c.name===catName);
+    if (!parentCat && catName && catName!=="-") {
+      const color = catColorMap[catName] || CSV_CAT_COLORS[colorIdx++ % CSV_CAT_COLORS.length];
+      catColorMap[catName] = color;
+      const safeId = "csv_p_"+catName.replace(/[^\w]/g,"_")+"_"+Date.now();
+      parentCat = {id:safeId, name:catName, icon:"📌", color, parentId:null};
+      cats.push(parentCat);
+    }
+    let catId = parentCat ? parentCat.id : (entryType==="expense" ? "other_e" : "other_i");
+    // Match sub-category
+    if (subName && subName!=="-" && parentCat) {
+      let subCat = cats.find(c=>c.parentId===parentCat.id && c.name===subName);
+      if (!subCat) {
+        const safeSubId = "csv_s_"+subName.replace(/[^\w]/g,"_")+"_"+Date.now()+"_"+i;
+        subCat = {id:safeSubId, name:subName, icon:"📌", color:parentCat.color, parentId:parentCat.id};
+        cats.push(subCat);
+      }
+      catId = subCat.id;
+    }
+    newEntries.push({
+      id: Date.now()+"_csv_"+i,
+      date, type:entryType, category:catId, amount, currency, memo
+    });
+    imported++;
+  }
+  return {
+    entries: [...store.entries, ...newEntries],
+    categories: { expense: expCats, income: incCats },
+    imported,
+  };
+}
+
+/* ===================== UI 小組件 ===================== */
+function SummaryPill({label, value, color}) {
+  return (
+    <div className="bg-gray-50 rounded-xl px-2 py-1.5 text-center">
+      <div className="text-[10px] text-gray-400">{label}</div>
+      <div className={`text-sm font-semibold amount-font truncate ${color}`}>{value}</div>
+    </div>
+  );
+}
+function TabBtn({active, onClick, icon, label}) {
+  return (
+    <button onClick={onClick} className="tab-btn flex flex-col items-center justify-center">
+      <div className="text-xl leading-none">{icon}</div>
+      <div className={`text-[11px] mt-1 ${active?"text-[color:var(--brand)] font-semibold":"text-gray-500"}`}>{label}</div>
+    </button>
+  );
+}
+
+/* ===================== SortableList (pointer-events drag) ===================== */
+function SortableList({ items, renderItem, onReorder, itemHeight = 68 }) {
+  const [dragIdx, setDragIdx] = useState(null);
+  const [overIdx, setOverIdx] = useState(null);
+  const pointerStartY = useRef(null);
+
+  const commit = useCallback((from, to) => {
+    setDragIdx(null); setOverIdx(null);
+    if (from !== null && to !== null && from !== to) onReorder(from, to);
+  }, [onReorder]);
+
+  const handlePointerDown = (e, idx) => {
+    e.currentTarget.setPointerCapture(e.pointerId);
+    pointerStartY.current = e.clientY;
+    setDragIdx(idx); setOverIdx(idx);
+  };
+  const handlePointerMove = (e, idx) => {
+    if (dragIdx === null || dragIdx !== idx) return;
+    e.preventDefault();
+    const dy = e.clientY - pointerStartY.current;
+    setOverIdx(Math.max(0, Math.min(items.length-1, dragIdx + Math.round(dy/itemHeight))));
+  };
+  const handlePointerUp = (e, idx) => {
+    if (dragIdx === null || dragIdx !== idx) return;
+    commit(dragIdx, overIdx);
+  };
+
+  const getStyle = (i) => {
+    if (dragIdx === null) return { transform:"translateY(0)", transition:"transform 0.18s ease", position:"relative", zIndex:0, opacity:1 };
+    if (i === dragIdx) return { transform:`translateY(${(overIdx-dragIdx)*itemHeight}px)`, zIndex:20, opacity:0.88, boxShadow:"0 8px 28px rgba(0,0,0,0.18)", borderRadius:"16px", transition:"box-shadow 0.1s", position:"relative" };
+    const dir = overIdx > dragIdx ? 1 : -1;
+    const inRange = dir===1 ? (i>dragIdx&&i<=overIdx) : (i<dragIdx&&i>=overIdx);
+    return { transform: inRange ? `translateY(${-dir*itemHeight}px)` : "translateY(0)", transition:"transform 0.18s ease", position:"relative", zIndex:0, opacity:1 };
+  };
+
+  return (
+    <div style={{position:"relative"}}>
+      {items.map((item, i) => (
+        <div key={item.id} style={getStyle(i)}>
+          {renderItem(item, i, {
+            handlePointerDown: e => handlePointerDown(e, i),
+            handlePointerMove: e => handlePointerMove(e, i),
+            handlePointerUp:   e => handlePointerUp(e, i),
+            isDragging: dragIdx === i,
+          })}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* ===================== App ===================== */
+function App() {
+  const [store, setStore] = useState(loadStore);
+  const [tab, setTab] = useState("home");
+  const [entryOpen, setEntryOpen] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [viewMonth, setViewMonth] = useState(() => { const d=new Date(); return monthKey(d); });
+  const drive = useGistSync(store, setStore);
+
+  useEffect(() => { saveStore(store); }, [store]);
+
+  const base = store.settings.baseCurrency;
+  const rates = store.settings.rates;
+
+  const monthEntries = useMemo(
+    () => store.entries.filter(e => sameMonth(e.date, viewMonth)).sort((a,b)=> a.date<b.date?1:-1),
+    [store.entries, viewMonth]
+  );
+
+  const monthTotals = useMemo(() => {
+    let inc=0, exp=0;
+    monthEntries.forEach(e => {
+      const v = toBase(e.amount, e.currency, rates);
+      if (e.type==="income") inc+=v; else exp+=v;
+    });
+    const tb = store.totalBudget || 0;
+    const net = tb > 0 ? tb - exp + inc : inc - exp;
+    return { inc, exp, net };
+  }, [monthEntries, rates, store.totalBudget]);
+
+  const upsertEntry = (entry) => {
+    setStore(s => {
+      const list = [...s.entries];
+      const idx = list.findIndex(x=>x.id===entry.id);
+      if (idx>=0) list[idx]=entry; else list.push(entry);
+      return {...s, entries:list};
+    });
+  };
+  const removeEntry = (id) => setStore(s => ({...s, entries:s.entries.filter(e=>e.id!==id)}));
+  const openAdd = () => { setEditing(null); setEntryOpen(true); };
+  const openEdit = (e) => { setEditing(e); setEntryOpen(true); };
+
+  return (
+    <div className="min-h-screen">
+      <header className="sticky top-0 z-20 bg-white border-b border-gray-100">
+        {/* ── Gist sync status bar ── */}
+        <div className="px-4 pt-2 pb-1 flex items-center justify-between border-b border-gray-50">
+          <div className="flex items-center gap-1.5 text-xs text-gray-400">
+            {drive.gistToken && drive.gistId ? (
+              drive.syncing ? (
+                <span>☁️ 同步中…</span>
+              ) : drive.syncError ? (
+                <span className="text-amber-500">⚠️ 同步失敗</span>
+              ) : (
+                <>
+                  <span style={{color:"var(--brand)"}}>☁️</span>
+                  <span style={{color:"var(--brand)"}}>已同步</span>
+                  {drive.lastSync && <span className="text-gray-300">{new Date(drive.lastSync).toLocaleTimeString("zh-HK",{hour:"2-digit",minute:"2-digit"})}</span>}
+                </>
+              )
+            ) : (
+              <span>☁️ 未啟用同步</span>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            {drive.gistToken && drive.gistId && (
+              <>
+                <span className="text-xs text-gray-300">@{drive.gistUser?.login || ""}</span>
+                <button onClick={() => drive.disconnect()} className="text-xs text-gray-400 active:text-gray-600">斷開</button>
+              </>
+            )}
+          </div>
+        </div>
+        {/* ── Month nav ── */}
+        <div className="px-4 py-3 flex items-center justify-between">
+          <button onClick={()=>shiftMonth(setViewMonth,viewMonth,-1)} className="w-9 h-9 rounded-full hover:bg-gray-100 text-gray-500 text-xl">‹</button>
+          <div className="text-center">
+            <div className="text-xs text-gray-400">{base} 主要幣值</div>
+            <div className="text-base font-semibold">{viewMonth.replace("-"," 年 ")} 月</div>
+          </div>
+          <button onClick={()=>shiftMonth(setViewMonth,viewMonth,+1)} className="w-9 h-9 rounded-full hover:bg-gray-100 text-gray-500 text-xl">›</button>
+        </div>
+        <div className="px-4 pb-3 grid grid-cols-3 gap-2">
+          <SummaryPill label="收入" value={fmt(monthTotals.inc,base)} color="text-[color:var(--income)]" />
+          <SummaryPill label="支出" value={fmt(monthTotals.exp,base)} color="text-[color:var(--expense)]" />
+          <SummaryPill label="結餘" value={fmt(monthTotals.net,base)} color={monthTotals.net>=0?"text-gray-800":"text-[color:var(--expense)]"} />
+        </div>
+      </header>
+
+      <main className="safe-bottom">
+        {tab==="home"  && <HomeView store={store} rates={rates} base={base} entries={monthEntries} onEdit={openEdit} onDelete={removeEntry} monthTotals={monthTotals} viewMonth={viewMonth} />}
+        {tab==="cal"   && <CalendarView store={store} rates={rates} base={base} viewMonth={viewMonth} entries={monthEntries} onEdit={openEdit} />}
+        {tab==="chart" && <ChartView store={store} rates={rates} base={base} entries={monthEntries} allEntries={store.entries} viewMonth={viewMonth} />}
+        {tab==="set"   && <SettingsView store={store} setStore={setStore} drive={drive}/>}
+      </main>
+
+      <button onClick={openAdd} className="fixed right-5 bottom-24 w-14 h-14 rounded-full shadow-lg grid place-items-center active:scale-95" style={{background:"var(--brand)",color:"white"}} aria-label="新增記帳">
+        <span className="text-3xl leading-none -mt-1">+</span>
+      </button>
+
+      <nav className="fixed bottom-0 inset-x-0 bg-white border-t border-gray-100 z-10">
+        <div className="grid grid-cols-4 h-16" style={{paddingBottom:"env(safe-area-inset-bottom)"}}>
+          <TabBtn active={tab==="home"}  onClick={()=>setTab("home")}  icon="🏠" label="首頁" />
+          <TabBtn active={tab==="cal"}   onClick={()=>setTab("cal")}   icon="📅" label="月曆" />
+          <TabBtn active={tab==="chart"} onClick={()=>setTab("chart")} icon="📊" label="圖表" />
+          <TabBtn active={tab==="set"}   onClick={()=>setTab("set")}   icon="⚙️" label="設定" />
+        </div>
+      </nav>
+
+      {entryOpen && (
+        <EntryModal
+          entry={editing}
+          store={store}
+          base={base}
+          rates={rates}
+          onSave={e=>{upsertEntry(e);setEntryOpen(false);}}
+          onDelete={id=>{removeEntry(id);setEntryOpen(false);}}
+          onClose={()=>setEntryOpen(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+/* ===================== 首頁 ===================== */
+function HomeView({store, rates, base, entries, onEdit, onDelete, monthTotals, viewMonth}) {
+  const now = new Date();
+  const todayISO = toISO(now);
+  const weekStart = new Date(now);
+  weekStart.setDate(now.getDate() - ((now.getDay()+6)%7));
+  const weekStartISO = toISO(weekStart);
+
+  const todayExp = useMemo(()=>entries.filter(e=>e.type==="expense"&&e.date===todayISO).reduce((s,e)=>s+toBase(e.amount,e.currency,rates),0),[entries,rates,todayISO]);
+  const weekExp  = useMemo(()=>entries.filter(e=>e.type==="expense"&&e.date>=weekStartISO).reduce((s,e)=>s+toBase(e.amount,e.currency,rates),0),[entries,rates,weekStartISO]);
+  const monthExp = monthTotals.exp;
+  const tb = store.totalBudget || 0;
+
+  const [ymY, ymM] = viewMonth.split("-").map(Number);
+  const daysInMonth = new Date(ymY, ymM, 0).getDate();
+  const dayBudget   = tb > 0 ? tb/daysInMonth : 0;
+  const weekStartDate = weekStart.getDate();
+  const daysThisWeek  = Math.min(weekStartDate+6, daysInMonth) - weekStartDate + 1;
+  const weekBudget    = dayBudget * daysThisWeek;
+
+  const expCatMap = store.categories.expense.reduce((a,c)=>{a[c.id]=c;return a;},{});
+  const catMap = [...store.categories.expense,...store.categories.income].reduce((a,c)=>{a[c.id]=c;return a;},{});
+
+  const topCatMap = useMemo(()=>{
+    const map={};
+    entries.filter(e=>e.type==="expense").forEach(e=>{
+      const cat=expCatMap[e.category]; const topId=cat?.parentId||e.category;
+      map[topId]=(map[topId]||0)+toBase(e.amount,e.currency,rates);
+    });
+    return map;
+  },[entries,rates]);
+
+  const topCats = store.categories.expense.filter(c=>!c.parentId&&(topCatMap[c.id]||0)>0)
+    .sort((a,b)=>(topCatMap[b.id]||0)-(topCatMap[a.id]||0)).slice(0,4);
+
+  const groups = useMemo(()=>{
+    const map={};
+    entries.forEach(e=>{(map[e.date]||=[]).push(e);});
+    return Object.entries(map).sort((a,b)=>a[0]<b[0]?1:-1);
+  },[entries]);
+
+  const [ym1,ym2] = viewMonth.split("-");
+
+  return (
+    <div className="px-3 pt-3 space-y-3">
+      {/* 支出概況卡片 */}
+      <div className="bg-white rounded-2xl shadow-sm p-4">
+        <div className="text-sm font-semibold mb-3">💳 支出概況</div>
+        {[
+          {label:"本月", exp:monthExp, budget:tb,         sub:tb>0?`共 ${daysInMonth} 日`:null},
+          {label:"本週", exp:weekExp,  budget:weekBudget, sub:tb>0?`共 ${daysThisWeek} 日`:null},
+          {label:"今日", exp:todayExp, budget:dayBudget,  sub:null},
+        ].map(({label,exp,budget,sub})=>{
+          const has=budget>0, remain=has?budget-exp:0, pct=has?Math.min(100,exp/budget*100):0, over=has&&exp>budget;
+          return (
+            <div key={label} className="mb-4 last:mb-0">
+              <div className="flex items-center justify-between mb-1">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-sm text-gray-500 font-medium">{label}</span>
+                  {sub&&<span className="text-[10px] text-gray-300">{sub}</span>}
+                </div>
+                <span className={`text-lg font-bold amount-font ${over?"text-[color:var(--expense)]":"text-gray-800"}`}>{fmt(exp,base)}</span>
+              </div>
+              {has&&(
+                <>
+                  <div className="h-2.5 bg-gray-100 rounded-full overflow-hidden mb-1">
+                    <div className="h-full rounded-full transition-all duration-300" style={{width:pct+"%",background:over?"var(--expense)":"#4CAF50"}}></div>
+                  </div>
+                  <div className={`text-[11px] ${over?"text-[color:var(--expense)] font-semibold":"text-gray-400"}`}>
+                    {over?`⚠️ 超出 ${fmt(Math.abs(remain),base)}`:`還可以用 ${fmt(remain,base)}`}
+                  </div>
+                </>
+              )}
+            </div>
+          );
+        })}
+        {tb===0&&<div className="mt-1 text-[11px] text-gray-400 text-center">設定總預算後可顯示剩餘可用金額</div>}
+      </div>
+
+      {/* 本月收支 + mini donut */}
+      <div className="bg-white rounded-2xl shadow-sm p-4">
+        <div className="text-sm font-semibold mb-3">{ym1} 年 {ym2} 月 收支</div>
+        <div className="flex items-center gap-3">
+          <div className="flex-1 space-y-1.5 min-w-0">
+            <div className="flex justify-between text-xs"><span className="text-gray-500">收入</span><span className="amount-font text-[color:var(--income)]">{fmt(monthTotals.inc,base)}</span></div>
+            <div className="flex justify-between text-xs"><span className="text-gray-500">支出</span><span className="amount-font text-[color:var(--expense)]">{fmt(monthTotals.exp,base)}</span></div>
+            <div className="flex justify-between text-sm font-semibold border-t border-gray-100 pt-1.5">
+              <span>結餘</span>
+              <span className={`amount-font ${monthTotals.net>=0?"text-gray-800":"text-[color:var(--expense)]"}`}>{fmt(monthTotals.net,base)}</span>
+            </div>
+          </div>
+          {(()=>{
+            const total=Object.values(topCatMap).reduce((a,b)=>a+b,0);
+            if(!total) return <div className="w-36 h-36 rounded-full bg-gray-100 grid place-items-center text-gray-400 text-xs flex-shrink-0">無支出</div>;
+            const size=144, r=52, strokeW=22, circ=2*Math.PI*r; let acc=0;
+            const topP=store.categories.expense.filter(c=>!c.parentId&&(topCatMap[c.id]||0)>0);
+            // Compute label positions for top 3
+            const top3=topP.slice(0,3);
+            const labelElems=[];
+            let labelAcc=0;
+            topP.forEach((c,i)=>{
+              const frac=(topCatMap[c.id]||0)/total;
+              if(i<3){
+                const midAngle=((labelAcc+frac/2)*360-90)*Math.PI/180;
+                const lr=r; // label on ring
+                const lx=size/2+lr*Math.cos(midAngle);
+                const ly=size/2+lr*Math.sin(midAngle);
+                labelElems.push({c,frac,lx,ly,midAngle});
+              }
+              labelAcc+=frac;
+            });
+            return (
+              <div style={{position:"relative",width:size,height:size,flexShrink:0}}>
+                <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{overflow:"visible"}}>
+                  <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="#F1F1F4" strokeWidth={strokeW}/>
+                  {topP.map(c=>{
+                    const frac=(topCatMap[c.id]||0)/total, dash=`${frac*circ} ${circ}`, rot=(acc/total)*360-90;
+                    acc+=(topCatMap[c.id]||0);
+                    return <circle key={c.id} cx={size/2} cy={size/2} r={r} fill="none" stroke={c.color} strokeWidth={strokeW} strokeDasharray={dash} strokeDashoffset="0" transform={`rotate(${rot} ${size/2} ${size/2})`}/>;
+                  })}
+                  {/* Labels for top 3 */}
+                  {labelElems.map(({c,frac,lx,ly,midAngle},i)=>{
+                    if(frac<0.05) return null;
+                    const labelR=r+strokeW/2+16;
+                    const tx=size/2+labelR*Math.cos(midAngle);
+                    const ty=size/2+labelR*Math.sin(midAngle);
+                    const anchor=tx<size/2?"end":"start";
+                    return (
+                      <g key={c.id}>
+                        <line x1={lx} y1={ly} x2={tx} y2={ty} stroke={c.color} strokeWidth="1" opacity="0.7"/>
+                        <text x={tx+(anchor==="start"?3:-3)} y={ty} textAnchor={anchor} dominantBaseline="middle"
+                          fontSize="9" fontWeight="600" fill={c.color}>{c.name}</text>
+                      </g>
+                    );
+                  })}
+                </svg>
+              </div>
+            );
+          })()}
+        </div>
+        {topCats.length>0&&(
+          <div className="mt-3 grid grid-cols-2 gap-1.5">
+            {topCats.map(c=>(
+              <div key={c.id} className="flex items-center gap-1.5 bg-gray-50 rounded-xl px-2.5 py-1.5">
+                <span className="text-base">{c.icon}</span>
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs truncate">{c.name}</div>
+                  <div className="text-[11px] amount-font text-[color:var(--expense)]">{fmt(topCatMap[c.id]||0,base)}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* 記帳明細 */}
+      {groups.length===0?(
+        <div className="px-6 py-10 text-center text-gray-400"><div className="text-4xl mb-3">📝</div><div>本月尚無紀錄，撳右下角「+」開始記帳</div></div>
+      ):(
+        <>
+          <div className="text-xs text-gray-400 px-1">最近記帳明細</div>
+          {groups.map(([date,list])=>{
+            const daySum=list.reduce((acc,e)=>{const v=toBase(e.amount,e.currency,rates);return e.type==="income"?acc+v:acc-v;},0);
+            const d=parseISO(date);
+            return (
+              <div key={date} className="bg-white rounded-2xl shadow-sm overflow-hidden">
+                <div className="px-4 py-2 flex items-center justify-between" style={{background:"var(--brand-soft)"}}>
+                  <div className="text-sm"><span className="font-semibold">{date.slice(5).replace("-","/")}</span><span className="ml-2 text-gray-500">週{weekdayZH[d.getDay()]}</span></div>
+                  <div className={`text-sm amount-font ${daySum>=0?"text-[color:var(--income)]":"text-[color:var(--expense)]"}`}>{daySum>=0?"+":""}{fmt(daySum,base)}</div>
+                </div>
+                <ul>
+                  {list.map(e=>{
+                    const cat=catMap[e.category]||{icon:"❓",name:"未分類",color:"#ddd"};
+                    return (
+                      <li key={e.id} className="px-4 py-3 flex items-center gap-3 border-t border-gray-50 active:bg-gray-50" onClick={()=>onEdit(e)}>
+                        <div className="w-10 h-10 rounded-full grid place-items-center text-lg" style={{background:cat.color+"55"}}>{cat.icon}</div>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm font-medium truncate">{cat.name}{e.memo?` · ${e.memo}`:""}</div>
+                          <div className="text-[11px] text-gray-400">{e.currency}{e.currency!==base?" → "+base:""}</div>
+                        </div>
+                        <div className={`text-sm font-semibold amount-font ${e.type==="income"?"text-[color:var(--income)]":"text-[color:var(--expense)]"}`}>
+                          {e.type==="income"?"+":"-"}{fmt(e.amount,e.currency)}
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            );
+          })}
+        </>
+      )}
+    </div>
+  );
+}
+
+
+/* ===================== 月曆 ===================== */
+function CalendarView({store, rates, base, viewMonth, entries, onEdit}) {
+  const [y,m] = viewMonth.split("-").map(Number);
+  const first = new Date(y,m-1,1);
+  const startDow = (first.getDay()+6)%7;
+  const daysInMonth = new Date(y,m,0).getDate();
+  const catMap = [...store.categories.expense,...store.categories.income].reduce((a,c)=>{a[c.id]=c;return a;},{});
+  const [selectedDay, setSelectedDay] = useState(null);
+
+  const dayMap = useMemo(()=>{
+    const map={};
+    entries.forEach(e=>{
+      if(!map[e.date]) map[e.date]={inc:0,exp:0};
+      const v=toBase(e.amount,e.currency,rates);
+      if(e.type==="income") map[e.date].inc+=v; else map[e.date].exp+=v;
+    });
+    return map;
+  },[entries,rates]);
+
+  const dayEntries = useMemo(()=>{
+    if(!selectedDay) return [];
+    const iso=`${viewMonth}-${pad2(selectedDay)}`;
+    return entries.filter(e=>e.date===iso).sort((a,b)=>a.date<b.date?1:-1);
+  },[selectedDay,entries,viewMonth]);
+
+  const cells=[];
+  for(let i=0;i<startDow;i++) cells.push(null);
+  for(let d=1;d<=daysInMonth;d++) cells.push(d);
+
+  return (
+    <div className="px-3 pt-3">
+      <div className="bg-white rounded-2xl shadow-sm overflow-hidden mb-3">
+        <div className="grid grid-cols-7 text-center border-b border-gray-100">
+          {["一","二","三","四","五","六","日"].map(d=>(
+            <div key={d} className="py-2 text-xs text-gray-400">{d}</div>
+          ))}
+        </div>
+        <div className="grid grid-cols-7">
+          {cells.map((d,i)=>{
+            if(!d) return <div key={i}/>;
+            const iso=`${viewMonth}-${pad2(d)}`;
+            const day=dayMap[iso];
+            const isToday=iso===toISO(new Date());
+            const isSel=selectedDay===d;
+            return (
+              <button key={d} onClick={()=>setSelectedDay(isSel?null:d)}
+                className={`py-1.5 flex flex-col items-center min-h-[52px] ${isSel?"bg-[color:var(--brand-soft)]":""}`}>
+                <span className={`text-xs w-6 h-6 flex items-center justify-center rounded-full mb-0.5 ${isToday?"bg-[color:var(--brand)] text-white font-semibold":""}`}>{d}</span>
+                {day&&(
+                  <div className="flex flex-col items-center gap-0.5">
+                    {day.inc>0&&<span className="text-[9px] amount-font text-[color:var(--income)]">+{Math.round(day.inc)}</span>}
+                    {day.exp>0&&<span className="text-[9px] amount-font text-[color:var(--expense)]">-{Math.round(day.exp)}</span>}
+                  </div>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {selectedDay&&(
+        <div className="mt-3 bg-white rounded-2xl shadow-sm overflow-hidden">
+          <div className="px-4 py-2 text-sm font-semibold" style={{background:"var(--brand-soft)"}}>
+            {y}/{pad2(m)}/{pad2(selectedDay)} 明細
+          </div>
+          {dayEntries.length===0?(
+            <div className="px-4 py-6 text-center text-gray-400 text-sm">當日沒有紀錄</div>
+          ):(
+            <ul>
+              {dayEntries.map(e=>{
+                const cat=catMap[e.category]||{icon:"❓",name:"未分類"};
+                return (
+                  <li key={e.id} onClick={()=>onEdit(e)} className="px-4 py-3 flex items-center gap-3 border-t border-gray-50 active:bg-gray-50">
+                    <div className="text-lg">{cat.icon}</div>
+                    <div className="flex-1 truncate"><div className="text-sm">{cat.name}{e.memo?` · ${e.memo}`:""}</div></div>
+                    <div className={`text-sm amount-font ${e.type==="income"?"text-[color:var(--income)]":"text-[color:var(--expense)]"}`}>
+                      {e.type==="income"?"+":"-"}{fmt(e.amount,e.currency)}
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ===================== 圖表 ===================== */
+function ChartView({store, rates, base, entries, allEntries, viewMonth}) {
+  const [period, setPeriod] = useState("month");
+  const [selectedCatId, setSelectedCatId] = useState(null);
+  const now = new Date();
+
+  const { rangeLabel, rangeEntries } = useMemo(()=>{
+    const [ymY,ymM] = viewMonth.split("-").map(Number);
+    if(period==="month"){
+      const d1=`${viewMonth}-01`, d2=`${viewMonth}-${String(new Date(ymY,ymM,0).getDate()).padStart(2,"0")}`;
+      return {rangeLabel:`${ymY} 年 ${ymM} 月`, rangeEntries:(allEntries||entries).filter(e=>e.date>=d1&&e.date<=d2)};
+    }
+    if(period==="week"){
+      const ws=new Date(now); ws.setDate(now.getDate()-((now.getDay()+6)%7));
+      const we=new Date(ws); we.setDate(ws.getDate()+6);
+      const d1=toISO(ws), d2=toISO(we);
+      return {rangeLabel:`${d1.slice(5).replace("-","/")} ～ ${d2.slice(5).replace("-","/")}`, rangeEntries:(allEntries||entries).filter(e=>e.date>=d1&&e.date<=d2)};
+    }
+    const yr=ymY;
+    return {rangeLabel:`${yr} 年`, rangeEntries:(allEntries||entries).filter(e=>e.date>=`${yr}-01-01`&&e.date<=`${yr}-12-31`)};
+  },[period,viewMonth,allEntries,entries]);
+
+  const expCatMap = store.categories.expense.reduce((a,c)=>{a[c.id]=c;return a;},{});
+  const incCatMap = store.categories.income.reduce((a,c)=>{a[c.id]=c;return a;},{});
+  const allCatMap = {...expCatMap,...incCatMap};
+  const parentExpCats = store.categories.expense.filter(c=>!c.parentId);
+  const parentIncCats = store.categories.income.filter(c=>!c.parentId);
+
+  const expByCat = useMemo(()=>{
+    const map={};
+    rangeEntries.filter(e=>e.type==="expense").forEach(e=>{
+      const cat=expCatMap[e.category]; const topId=cat?.parentId||e.category;
+      map[topId]=(map[topId]||0)+toBase(e.amount,e.currency,rates);
+    });
+    return map;
+  },[rangeEntries,rates]);
+
+  const incByCat = useMemo(()=>{
+    const map={};
+    rangeEntries.filter(e=>e.type==="income").forEach(e=>{
+      const cat=incCatMap[e.category]; const topId=cat?.parentId||e.category;
+      map[topId]=(map[topId]||0)+toBase(e.amount,e.currency,rates);
+    });
+    return map;
+  },[rangeEntries,rates]);
+
+  const totalExp=Object.values(expByCat).reduce((a,b)=>a+b,0);
+  const totalInc=Object.values(incByCat).reduce((a,b)=>a+b,0);
+  const netTotal=totalInc-totalExp;
+
+  const pieData=parentExpCats.filter(c=>(expByCat[c.id]||0)>0).map(c=>({id:c.id,value:expByCat[c.id],cat:c})).sort((a,b)=>b.value-a.value);
+
+  const filteredEntries=useMemo(()=>{
+    if(!selectedCatId) return [];
+    return rangeEntries.filter(e=>{
+      if(e.type!=="expense") return false;
+      const cat=expCatMap[e.category];
+      return (cat?.parentId||e.category)===selectedCatId;
+    }).sort((a,b)=>a.date<b.date?1:-1);
+  },[selectedCatId,rangeEntries]);
+
+  const selectedCat=selectedCatId?expCatMap[selectedCatId]:null;
+  const totalBudget=store.totalBudget||0;
+  const budgetRows=period==="month"
+    ?parentExpCats.filter(c=>(store.budgets[c.id]||0)>0).map(c=>({id:c.id,limit:store.budgets[c.id],used:expByCat[c.id]||0,cat:c}))
+    :[];
+
+  return (
+    <React.Fragment>
+    <div className="px-3 pt-3 space-y-3 pb-4">
+      {/* 週/月/年 切換 */}
+      <div className="flex items-center justify-between">
+        <div className="text-sm text-gray-500 font-medium">{rangeLabel}</div>
+        <div className="bg-white rounded-xl shadow-sm p-0.5 flex text-xs">
+          {[["week","本週"],["month","本月"],["year","本年"]].map(([k,l])=>(
+            <button key={k} onClick={()=>{setPeriod(k);setSelectedCatId(null);}}
+              className={`px-3 py-1.5 rounded-lg ${period===k?"text-white font-semibold":"text-gray-500"}`}
+              style={{background:period===k?"var(--brand)":"transparent"}}>{l}</button>
+          ))}
+        </div>
+      </div>
+
+      {/* 大圓餅 */}
+      <div className="bg-white rounded-2xl shadow-sm p-4">
+        {totalExp===0?(
+          <div className="py-10 text-center text-gray-400 text-sm">本期暫無支出</div>
+        ):(
+          <div className="flex flex-col items-center">
+            <LargeDonut data={pieData} total={totalExp} base={base} onSelect={setSelectedCatId} selectedId={selectedCatId}/>
+            <div className="text-xs text-gray-400 mt-1">{pieData.length} 個分類</div>
+          </div>
+        )}
+      </div>
+
+      {/* 收支總覽 + 分類列表 */}
+      <div className="bg-white rounded-2xl shadow-sm divide-y divide-gray-50">
+        <div className="px-4 py-3 flex justify-between text-sm">
+          <span className="text-gray-500">收支</span>
+          <span className={`font-semibold amount-font ${netTotal>=0?"text-[color:var(--income)]":"text-[color:var(--expense)]"}`}>{fmt(netTotal,base)}</span>
+        </div>
+        {totalExp>0&&<>
+          <div className="px-4 py-2.5 flex justify-between text-sm font-semibold">
+            <span>支出</span><span className="amount-font text-[color:var(--expense)]">{fmt(totalExp,base)}</span>
+          </div>
+          {parentExpCats.filter(c=>(expByCat[c.id]||0)>0).map(c=>(
+            <button key={c.id} className="w-full px-4 py-3 flex items-center gap-3 active:bg-gray-50"
+              onClick={()=>setSelectedCatId(c.id===selectedCatId?null:c.id)}>
+              <div className="w-9 h-9 rounded-full grid place-items-center flex-shrink-0 text-lg" style={{background:c.color+"44"}}>{c.icon}</div>
+              <div className="flex-1 text-left">
+                <div className={`text-sm ${c.id===selectedCatId?"font-semibold text-[color:var(--brand)]":""}`}>{c.name}</div>
+                <div className="h-1 bg-gray-100 rounded-full mt-1 overflow-hidden">
+                  <div className="h-full rounded-full" style={{width:Math.round((expByCat[c.id]||0)/totalExp*100)+"%",background:c.color}}></div>
+                </div>
+              </div>
+              <span className="text-sm amount-font text-gray-700">{fmt(expByCat[c.id]||0,base)}</span>
+            </button>
+          ))}
+        </>}
+        {totalInc>0&&<>
+          <div className="px-4 py-2.5 flex justify-between text-sm font-semibold">
+            <span>收入</span><span className="amount-font text-[color:var(--income)]">{fmt(totalInc,base)}</span>
+          </div>
+          {parentIncCats.filter(c=>(incByCat[c.id]||0)>0).map(c=>(
+            <div key={c.id} className="px-4 py-3 flex items-center gap-3">
+              <div className="w-9 h-9 rounded-full grid place-items-center flex-shrink-0 text-lg" style={{background:c.color+"44"}}>{c.icon}</div>
+              <div className="flex-1 text-left">
+                <div className="text-sm">{c.name}</div>
+                <div className="h-1 bg-gray-100 rounded-full mt-1 overflow-hidden">
+                  <div className="h-full rounded-full" style={{width:Math.round((incByCat[c.id]||0)/totalInc*100)+"%",background:c.color}}></div>
+                </div>
+              </div>
+              <span className="text-sm amount-font text-gray-700">{fmt(incByCat[c.id]||0,base)}</span>
+            </div>
+          ))}
+        </>}
+      </div>
+
+      {/* 預算（月份模式）*/}
+      {period==="month"&&(budgetRows.length>0||totalBudget>0)&&(
+        <div className="bg-white rounded-2xl shadow-sm p-4">
+          <div className="text-sm font-semibold mb-3">預算進度</div>
+          {totalBudget>0&&(
+            <div className="mb-3 pb-3 border-b border-gray-100">
+              <div className="flex justify-between text-xs mb-1">
+                <span className="font-semibold">📊 總預算</span>
+                <span className={`amount-font ${totalExp>totalBudget?"text-[color:var(--expense)] font-semibold":"text-gray-500"}`}>{fmt(totalExp,base)} / {fmt(totalBudget,base)}</span>
+              </div>
+              <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                <div className="h-full rounded-full" style={{width:Math.min(100,totalBudget>0?totalExp/totalBudget*100:0)+"%",background:totalExp>totalBudget?"var(--expense)":"var(--brand)"}}></div>
+              </div>
+            </div>
+          )}
+          <div className="space-y-3">
+            {budgetRows.map(r=>{
+              const pct=Math.min(100,r.limit>0?r.used/r.limit*100:0), over=r.used>r.limit;
+              return (
+                <div key={r.id}>
+                  <div className="flex justify-between text-xs mb-1">
+                    <span>{r.cat.icon} {r.cat.name}</span>
+                    <span className={`amount-font ${over?"text-[color:var(--expense)] font-semibold":"text-gray-500"}`}>{fmt(r.used,base)} / {fmt(r.limit,base)}</span>
+                  </div>
+                  <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                    <div className="h-full rounded-full" style={{width:pct+"%",background:over?"var(--expense)":r.cat.color}}></div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+
+    {/* 分類明細 overlay */}
+    {selectedCatId&&selectedCat&&(
+      <div className="fixed inset-0 z-30 bg-black/30 fade-in flex items-end" onClick={()=>setSelectedCatId(null)}>
+        <div className="sheet bg-white w-full rounded-t-3xl max-h-[75vh] flex flex-col" onClick={e=>e.stopPropagation()}>
+          <div className="px-4 py-3 flex items-center justify-between border-b border-gray-100 flex-shrink-0">
+            <div className="flex items-center gap-2">
+              <span className="w-8 h-8 rounded-full grid place-items-center text-base" style={{background:selectedCat.color+"55"}}>{selectedCat.icon}</span>
+              <span className="font-semibold text-sm">{selectedCat.name}</span>
+              <span className="text-xs text-gray-400 ml-1">{filteredEntries.length} 筆</span>
+            </div>
+            <button onClick={()=>setSelectedCatId(null)} className="text-gray-400 text-lg">✕</button>
+          </div>
+          <div className="overflow-y-auto flex-1 no-scrollbar">
+            {filteredEntries.length===0?(
+              <div className="py-10 text-center text-gray-400 text-sm">本期無此分類支出</div>
+            ):(
+              <ul>
+                {filteredEntries.map(e=>{
+                  const cat=allCatMap[e.category]||{icon:"❓",name:"未分類",color:"#ddd"};
+                  return (
+                    <li key={e.id} className="px-4 py-3 flex items-center gap-3 border-b border-gray-50">
+                      <div className="w-9 h-9 rounded-full grid place-items-center text-base flex-shrink-0" style={{background:cat.color+"55"}}>{cat.icon}</div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-medium truncate">{cat.name}{e.memo?` · ${e.memo}`:""}</div>
+                        <div className="text-[11px] text-gray-400">{e.date}</div>
+                      </div>
+                      <div className="text-sm font-semibold amount-font text-[color:var(--expense)]">-{fmt(e.amount,e.currency)}</div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+        </div>
+      </div>
+    )}
+    </React.Fragment>
+  );
+}
+
+function LargeDonut({data, total, base, onSelect, selectedId}) {
+  const size=200,r=80,c=2*Math.PI*r; let acc=0;
+  return (
+    <div style={{position:"relative",width:size,height:size}}>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+        <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="#F1F1F4" strokeWidth="28"/>
+        {data.map(d=>{
+          const frac=d.value/total, dash=`${frac*c} ${c}`, rot=(acc/total)*360-90;
+          acc+=d.value;
+          const isSel=selectedId===d.id;
+          return <circle key={d.id} cx={size/2} cy={size/2} r={r} fill="none"
+            stroke={d.cat.color} strokeWidth={isSel?36:28}
+            strokeDasharray={dash} strokeDashoffset="0"
+            opacity={selectedId&&!isSel?0.3:1}
+            transform={`rotate(${rot} ${size/2} ${size/2})`}
+            onClick={()=>onSelect&&onSelect(d.id===selectedId?null:d.id)}
+            style={{transition:"all .15s ease",cursor:"pointer"}}/>;
+        })}
+      </svg>
+      <div style={{position:"absolute",top:0,left:0,width:size,height:size,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",pointerEvents:"none"}}>
+        <div className="text-xs text-gray-400">支出</div>
+        <div className="text-lg font-bold amount-font" style={{color:"var(--expense)"}}>{fmt(total,base)}</div>
+      </div>
+    </div>
+  );
+}
+
+
+/* ===================== 設定頁 ===================== */
+function AboutView() {
+  return (
+    <div className="space-y-3">
+      <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
+        <div className="flex flex-col items-center py-10 px-6">
+          <div className="w-20 h-20 rounded-3xl grid place-items-center text-4xl mb-4 shadow-md" style={{background:"var(--brand)"}}>
+            💴
+          </div>
+          <div className="text-xl font-bold mb-1">AKR記帳本</div>
+          <div className="text-sm text-gray-400 mb-6">繁中 PWA 記帳應用</div>
+          <div className="w-full space-y-3">
+            <div className="flex justify-between items-center py-3 border-b border-gray-100">
+              <span className="text-sm text-gray-500">版本</span>
+              <span className="text-sm font-semibold text-gray-800">v1.0.260417</span>
+            </div>
+            <div className="flex justify-between items-center py-3 border-b border-gray-100">
+              <span className="text-sm text-gray-500">製作者</span>
+              <span className="text-sm font-semibold" style={{color:"var(--brand)"}}>AKiRa</span>
+            </div>
+            <div className="flex justify-between items-center py-3 border-b border-gray-100">
+              <span className="text-sm text-gray-500">技術</span>
+              <span className="text-sm text-gray-600">React · Tailwind · PWA</span>
+            </div>
+            <div className="flex justify-between items-center py-3">
+              <span className="text-sm text-gray-500">支援幣種</span>
+              <span className="text-sm text-gray-600">MOP · HKD · JPY · TWD</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div className="text-center text-[11px] text-gray-300 pb-2">Made with ❤️ by AKiRa</div>
+    </div>
+  );
+}
+
+function SettingsView({store, setStore, drive}) {
+  const [tab, setTab] = useState("basic");
+  const tabs = [["basic","幣值"],["cat","分類"],["budget","預算"],["data","數據"],["about","關於"]];
+  return (
+    <div className="px-3 pt-3 space-y-3">
+      <div className="bg-white rounded-2xl shadow-sm p-1 flex gap-1">
+        {tabs.map(([k,l])=>(
+          <button key={k} onClick={()=>setTab(k)}
+            className={`flex-1 py-1 rounded-xl text-[11px] leading-tight ${tab===k?"bg-[color:var(--brand-soft)] text-[color:var(--brand)] font-semibold":"text-gray-500"}`}>{l}</button>
+        ))}
+      </div>
+      {tab==="basic"  && <BasicSettings store={store} setStore={setStore}/>}
+      {tab==="cat"    && <CatSettings store={store} setStore={setStore}/>}
+      {tab==="budget" && <BudgetSettings store={store} setStore={setStore}/>}
+      {tab==="data"   && <DataSettings store={store} setStore={setStore} drive={drive}/>}
+      {tab==="about"  && <AboutView/>}
+    </div>
+  );
+}
+
+function BasicSettings({store, setStore}) {
+  const base = store.settings.baseCurrency;
+  const rates = store.settings.rates;
+  const [fetchingRates, setFetchingRates] = useState(false);
+  const [rateMsg, setRateMsg] = useState("");
+  const setBase = (c) => setStore(s=>({...s, settings:{...s.settings, baseCurrency:c}}));
+  const setRate = (c, v) => setStore(s=>({...s, settings:{...s.settings, rates:{...s.settings.rates, [c]:parseFloat(v)||0}}}));
+
+  const fetchRates = async () => {
+    setFetchingRates(true);
+    setRateMsg("");
+    try {
+      // Use exchangerate-api free endpoint (no key needed for basic pairs)
+      const res = await fetch(`https://open.er-api.com/v6/latest/${base}`);
+      if (!res.ok) throw new Error("網絡錯誤");
+      const data = await res.json();
+      if (data.result !== "success") throw new Error("API 錯誤");
+      const newRates = {...rates};
+      CURRENCIES.forEach(c => {
+        if (c.code === base) { newRates[c.code] = 1; return; }
+        const r = data.rates[c.code];
+        if (r) newRates[c.code] = Math.round(r * 10000) / 10000;
+      });
+      setStore(s=>({...s, settings:{...s.settings, rates:newRates}}));
+      setRateMsg("✅ 匯率已更新（" + new Date().toLocaleTimeString("zh-HK") + "）");
+    } catch(e) {
+      setRateMsg("❌ 同步失敗：" + e.message);
+    } finally {
+      setFetchingRates(false);
+    }
+  };
+  return (
+    <div className="space-y-3">
+      <div className="bg-white rounded-2xl shadow-sm p-4">
+        <div className="text-sm font-semibold mb-3">主要幣值</div>
+        <div className="grid grid-cols-4 gap-2">
+          {CURRENCIES.map(c=>(
+            <button key={c.code} onClick={()=>setBase(c.code)}
+              className={`py-2 rounded-xl text-xs font-medium ${base===c.code?"text-white":"bg-gray-100 text-gray-600"}`}
+              style={{background:base===c.code?"var(--brand)":undefined}}>{c.code}</button>
+          ))}
+        </div>
+      </div>
+      <div className="bg-white rounded-2xl shadow-sm p-4">
+        <div className="flex items-center justify-between mb-3">
+          <div className="text-sm font-semibold">匯率設定（兌換至 {base}）</div>
+          <button onClick={fetchRates} disabled={fetchingRates}
+            className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-xl font-medium transition-all ${fetchingRates?"bg-gray-100 text-gray-400":"bg-[color:var(--brand-soft)] text-[color:var(--brand)] active:opacity-70"}`}>
+            <span className={fetchingRates?"animate-spin":""}>{fetchingRates?"⟳":"🔄"}</span>
+            {fetchingRates?"同步中...":"同步最新匯率"}
+          </button>
+        </div>
+        {rateMsg&&<div className="text-xs mb-3 px-1" style={{color:rateMsg.startsWith("✅")?"#2ECC71":"#E74C3C"}}>{rateMsg}</div>}
+        <div className="space-y-2">
+          {CURRENCIES.map(c=>(
+            <div key={c.code} className="flex items-center gap-3">
+              <span className="text-sm w-10">{c.code}</span>
+              <input type="number" value={rates[c.code]} step="0.001"
+                onChange={e=>setRate(c.code,e.target.value)}
+                className="flex-1 border border-gray-200 rounded-xl px-3 py-2 text-sm text-right"
+                disabled={c.code===base}/>
+              <span className="text-xs text-gray-400 w-6">{base}</span>
+            </div>
+          ))}
+        </div>
+        <div className="text-[10px] text-gray-400 mt-2">匯率數據來源：Open Exchange Rates (免費版)</div>
+      </div>
+    </div>
+  );
+}
+
+function CatSettings({store, setStore}) {
+  const [type, setType] = useState("expense");
+  const cats = store.categories[type];
+  const parentCats = cats.filter(c=>!c.parentId);
+
+  const updateCat = (id, field, val) =>
+    setStore(s=>({...s, categories:{...s.categories, [type]:s.categories[type].map(c=>c.id===id?{...c,[field]:val}:c)}}));
+
+  const reorderParents = (from, to) => {
+    setStore(s => {
+      const all = [...s.categories[type]];
+      const parents = all.filter(c=>!c.parentId);
+      const children = all.filter(c=>c.parentId);
+      const moved = parents.splice(from, 1)[0];
+      parents.splice(to, 0, moved);
+      // Rebuild: interleave parents with their children
+      const result = [];
+      parents.forEach(p => {
+        result.push(p);
+        children.filter(c=>c.parentId===p.id).forEach(c=>result.push(c));
+      });
+      return {...s, categories:{...s.categories, [type]:result}};
+    });
+  };
+
+  const reorderChildren = (parentId, from, to) => {
+    setStore(s => {
+      const all = [...s.categories[type]];
+      const children = all.filter(c=>c.parentId===parentId);
+      const moved = children.splice(from, 1)[0];
+      children.splice(to, 0, moved);
+      const others = all.filter(c=>c.parentId!==parentId);
+      const parentIdx = others.findIndex(c=>c.id===parentId);
+      const result = [...others.slice(0,parentIdx+1), ...children, ...others.slice(parentIdx+1)];
+      return {...s, categories:{...s.categories, [type]:result}};
+    });
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="bg-white rounded-2xl shadow-sm p-1 flex gap-1">
+        {[["expense","支出"],["income","收入"]].map(([t,l])=>(
+          <button key={t} onClick={()=>setType(t)}
+            className={`flex-1 py-1.5 rounded-xl text-sm ${type===t?"bg-[color:var(--brand-soft)] text-[color:var(--brand)] font-semibold":"bg-gray-100 text-gray-500"}`}>{l}</button>
+        ))}
+      </div>
+      <div className="text-[11px] text-gray-400 px-1">點擊 Icon／名稱可修改；長按 ☰ 可拖拉排序</div>
+      <SortableList
+        items={parentCats}
+        itemHeight={60}
+        onReorder={reorderParents}
+        renderItem={(parent, pi, drag) => {
+          const children=cats.filter(c=>c.parentId===parent.id);
+          return (
+            <div className={`bg-white rounded-2xl shadow-sm overflow-hidden mb-2 ${drag.isDragging?"ring-2 ring-[color:var(--brand)]":""}`}>
+              <div className="px-3 py-2.5 flex items-center gap-3 bg-gray-50">
+                <div
+                  onPointerDown={drag.handlePointerDown}
+                  onPointerMove={drag.handlePointerMove}
+                  onPointerUp={drag.handlePointerUp}
+                  className="text-gray-300 text-lg px-1 cursor-grab active:cursor-grabbing select-none flex-shrink-0"
+                  style={{touchAction:"none"}}>☰</div>
+                <div className="w-9 h-9 rounded-full grid place-items-center flex-shrink-0" style={{background:parent.color+"55"}}>
+                  <input type="text" value={parent.icon} onChange={e=>updateCat(parent.id,"icon",e.target.value.trim().slice(0,4))}
+                    className="w-7 text-center text-xl bg-transparent border-0 outline-none"/>
+                </div>
+                <input type="text" value={parent.name} onChange={e=>updateCat(parent.id,"name",e.target.value.slice(0,10))}
+                  className="flex-1 font-semibold text-sm bg-transparent border-0 outline-none"/>
+                <span className="text-[10px] text-gray-400 flex-shrink-0">{children.length>0?`${children.length}項`:"無子項"}</span>
+              </div>
+              {children.length>0&&(
+                <SortableList
+                  items={children}
+                  itemHeight={52}
+                  onReorder={(from,to)=>reorderChildren(parent.id,from,to)}
+                  renderItem={(c, ci, cdrag) => (
+                    <div className={`px-3 py-2 flex items-center gap-3 border-t border-gray-50 ${cdrag.isDragging?"bg-gray-50":""}`}>
+                      <div
+                        onPointerDown={cdrag.handlePointerDown}
+                        onPointerMove={cdrag.handlePointerMove}
+                        onPointerUp={cdrag.handlePointerUp}
+                        className="text-gray-300 text-base ml-2 cursor-grab active:cursor-grabbing select-none flex-shrink-0"
+                        style={{touchAction:"none"}}>☰</div>
+                      <div className="w-8 h-8 rounded-full grid place-items-center flex-shrink-0" style={{background:c.color+"55"}}>
+                        <input type="text" value={c.icon} onChange={e=>updateCat(c.id,"icon",e.target.value.trim().slice(0,4))}
+                          className="w-6 text-center text-base bg-transparent border-0 outline-none"/>
+                      </div>
+                      <input type="text" value={c.name} onChange={e=>updateCat(c.id,"name",e.target.value.slice(0,10))}
+                        className="flex-1 text-sm bg-gray-50 rounded-lg px-2.5 py-1.5"/>
+                    </div>
+                  )}
+                />
+              )}
+            </div>
+          );
+        }}
+      />
+    </div>
+  );
+}
+
+function BudgetSettings({store, setStore}) {
+  const base = store.settings.baseCurrency;
+  const parentExpCats = store.categories.expense.filter(c=>!c.parentId);
+  const budgets = store.budgets || {};
+  const totalBudget = store.totalBudget || 0;
+
+  const setBudget = (id, val) => setStore(s=>({...s, budgets:{...s.budgets, [id]:parseFloat(val)||0}}));
+  const setTotalBudget = (val) => setStore(s=>({...s, totalBudget:parseFloat(val)||0}));
+
+  const catBudgetSum = parentExpCats.reduce((sum,c)=>(budgets[c.id]||0)>0?sum+(budgets[c.id]||0):sum,0);
+  const overAlloc = totalBudget>0 && catBudgetSum>totalBudget;
+
+  return (
+    <div className="space-y-3">
+      {/* 總預算 */}
+      <div className="bg-white rounded-2xl shadow-sm p-4">
+        <div className="text-sm font-semibold mb-3">📊 每月總預算 ({base})</div>
+        <div className="flex items-center gap-3">
+          <input type="number" value={totalBudget||""} placeholder="0 = 不設定"
+            onChange={e=>setTotalBudget(e.target.value)}
+            className="flex-1 border border-gray-200 rounded-xl px-3 py-2.5 text-sm text-right"/>
+          <span className="text-sm text-gray-400">{base}</span>
+        </div>
+        {overAlloc&&(
+          <div className="mt-2 text-xs text-[color:var(--expense)] font-medium">
+            ⚠️ 分類預算合計 {fmt(catBudgetSum,base)} 已超過總預算 {fmt(totalBudget,base)}
+          </div>
+        )}
+        {totalBudget>0&&<div className="mt-2 text-xs text-gray-400">分類預算啟用後，合計不能超過總預算</div>}
+      </div>
+
+      {/* 分類預算 */}
+      <div className="bg-white rounded-2xl shadow-sm p-4">
+        <div className="text-sm font-semibold mb-3">分類預算 ({base})</div>
+        <div className="space-y-3">
+          {parentExpCats.map(c=>(
+            <div key={c.id} className="flex items-center gap-3">
+              <span className="text-xl w-8 flex-shrink-0">{c.icon}</span>
+              <span className="text-sm flex-1 truncate">{c.name}</span>
+              <input type="number" value={budgets[c.id]||""} placeholder="0"
+                onChange={e=>setBudget(c.id,e.target.value)}
+                className="w-28 border border-gray-200 rounded-xl px-3 py-2 text-sm text-right"/>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ConfirmDialog({open, title, message, onConfirm, onCancel, confirmLabel="確認", danger=false}) {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center px-6" onClick={onCancel}>
+      <div className="absolute inset-0 bg-black/40"/>
+      <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-sm p-5 fade-in" onClick={e=>e.stopPropagation()}>
+        <div className="text-base font-semibold mb-2">{title}</div>
+        <div className="text-sm text-gray-500 mb-5 leading-relaxed">{message}</div>
+        <div className="flex gap-2">
+          <button onClick={onCancel} className="flex-1 py-2.5 rounded-xl text-sm font-medium bg-gray-100 text-gray-600">取消</button>
+          <button onClick={onConfirm} className={`flex-1 py-2.5 rounded-xl text-sm font-medium text-white ${danger?"bg-red-500":"bg-[color:var(--brand)]"}`}>{confirmLabel}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── GitHub Gist 同步面板 ── */
+function GistConnect({ onConnect, syncing }) {
+  const [tok, setTok] = useState("");
+  return (
+    <div className="space-y-2">
+      <div className="flex gap-2">
+        <input
+          type="password"
+          value={tok}
+          onChange={e => setTok(e.target.value)}
+          placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
+          className="flex-1 px-3 py-2.5 text-xs border border-gray-200 rounded-xl focus:outline-none focus:border-pink-300"
+        />
+        <button
+          onClick={() => tok.trim() && onConnect(tok.trim())}
+          disabled={!tok.trim() || syncing}
+          className="px-4 py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-50 active:opacity-80"
+          style={{background:"var(--brand)"}}>
+          {syncing ? "⏳" : "連接"}
+        </button>
+      </div>
+      <a
+        href="https://github.com/settings/tokens/new?scopes=gist&description=AKR%E8%A8%98%E5%B8%B3%E6%9C%AC"
+        target="_blank" rel="noopener noreferrer"
+        className="block text-center text-xs text-blue-400 underline py-1">
+        📋 點此前往 GitHub 生成 Token（只需勾選 gist 權限）
+      </a>
+    </div>
+  );
+}
+
+function GistSyncPanel({ drive }) {
+  const connected = !!(drive.gistToken && drive.gistId);
+  return (
+    <div className="bg-white rounded-2xl shadow-sm p-4 space-y-3">
+      <div className="text-sm font-semibold">☁️ 雲端同步（GitHub Gist）</div>
+      {connected ? (
+        <>
+          <div className="flex items-center gap-2 text-xs bg-green-50 text-green-700 px-3 py-2.5 rounded-xl">
+            <span>✅ 已連接</span>
+            <span className="text-green-500 font-medium">@{drive.gistUser?.login}</span>
+          </div>
+          {drive.syncError && (
+            <div className="text-xs text-amber-600 bg-amber-50 px-3 py-2 rounded-xl">⚠️ {drive.syncError}</div>
+          )}
+          {drive.lastSync && (
+            <div className="text-xs text-gray-400">最後同步：{new Date(drive.lastSync).toLocaleString("zh-HK")}</div>
+          )}
+          <button onClick={drive.syncNow} disabled={drive.syncing}
+            className="w-full py-2.5 rounded-xl text-sm font-semibold disabled:opacity-50 active:opacity-80"
+            style={{color:"var(--brand)", background:"var(--brand-soft)"}}>
+            {drive.syncing ? "同步中…" : "🔄 立即同步"}
+          </button>
+          <button onClick={drive.disconnect}
+            className="w-full py-2 rounded-xl text-xs text-gray-400 bg-gray-50 active:opacity-80">
+            斷開連接
+          </button>
+        </>
+      ) : (
+        <>
+          <div className="text-xs text-gray-400 leading-relaxed">
+            使用 GitHub Personal Access Token 同步資料，無需 OAuth 授權彈窗，永久有效。<br/>
+            換機時輸入同一個 Token 即可一鍵恢復所有資料。
+          </div>
+          <GistConnect onConnect={drive.connect} syncing={drive.syncing} />
+        </>
+      )}
+    </div>
+  );
+}
+
+function DataSettings({store, setStore, drive}) {
+  const [msg, setMsg] = useState("");
+  const [dialog, setDialog] = useState(null); // {title, message, onConfirm, danger}
+  const flash = (m, isErr=false) => { setMsg({text:m, err:isErr}); setTimeout(()=>setMsg(null),3000); };
+  const showConfirm = (cfg) => setDialog(cfg);
+  const closeDialog = () => setDialog(null);
+
+  const exportJSON = () => {
+    const count = store.entries.length;
+    showConfirm({
+      title: "確認匯出",
+      message: `即將匯出 ${count} 筆記帳資料為 JSON 備份檔案。`,
+      confirmLabel: `匯出 ${count} 筆`,
+      danger: false,
+      onConfirm: () => {
+        closeDialog();
+        const data = JSON.stringify(store, null, 2);
+        const a = document.createElement("a");
+        a.href = "data:application/json;charset=utf-8," + encodeURIComponent(data);
+        a.download = `zaim_backup_${new Date().toISOString().slice(0,10)}.json`;
+        a.click();
+        flash("✅ 已匯出 " + count + " 筆資料");
+      }
+    });
+  };
+
+  const importJSON = (e) => {
+    const file = e.target.files[0]; if(!file) return;
+    e.target.value="";
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const imported = JSON.parse(ev.target.result);
+        if (!imported.entries) throw new Error("格式錯誤");
+        if (!imported.totalBudget) imported.totalBudget = 0;
+        const count = imported.entries.length;
+        showConfirm({
+          title: "確認匯入 JSON",
+          message: `備份檔案包含 ${count} 筆記帳資料。
+匯入後將覆蓋現有全部資料（共 ${store.entries.length} 筆），此操作不可還原。`,
+          confirmLabel: `匯入 ${count} 筆`,
+          danger: true,
+          onConfirm: () => {
+            closeDialog();
+            setStore(imported);
+            flash("✅ 已匯入 " + count + " 筆資料");
+          }
+        });
+      } catch { flash("❌ 匯入失敗，請確認檔案格式", true); }
+    };
+    reader.readAsText(file);
+  };
+
+  const importCSV = (e) => {
+    const file = e.target.files[0]; if(!file) return;
+    e.target.value="";
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const result = importZaimCSV(ev.target.result, store);
+      if (!result) { flash("❌ CSV 格式無法識別", true); return; }
+      const count = result.imported;
+      showConfirm({
+        title: "確認匯入 Zaim CSV",
+        message: `解析到 ${count} 筆記帳資料。
+將新增至現有 ${store.entries.length} 筆記錄中（不覆蓋）。`,
+        confirmLabel: `匯入 ${count} 筆`,
+        danger: false,
+        onConfirm: () => {
+          closeDialog();
+          setStore(s=>({...s, entries:result.entries, categories:result.categories}));
+          flash("✅ 成功匯入 " + count + " 筆");
+        }
+      });
+    };
+    reader.readAsText(file, "UTF-8");
+  };
+
+  const clearAll = () => {
+    showConfirm({
+      title: "⚠️ 清除全部資料",
+      message: `即將永久刪除全部 ${store.entries.length} 筆記帳資料及所有設定，此操作不可還原。`,
+      confirmLabel: "確認清除",
+      danger: true,
+      onConfirm: () => {
+        closeDialog();
+        setStore(defaultStore());
+        flash("🗑️ 已清除全部資料");
+      }
+    });
+  };
+
+  return (
+    <>
+    <ConfirmDialog
+      open={!!dialog}
+      title={dialog?.title}
+      message={dialog?.message}
+      confirmLabel={dialog?.confirmLabel}
+      danger={dialog?.danger}
+      onConfirm={dialog?.onConfirm}
+      onCancel={closeDialog}
+    />
+    <div className="space-y-3">
+      {msg&&<div className={`text-sm px-4 py-3 rounded-2xl text-center font-medium ${msg.err?"bg-red-50 text-red-600":"bg-green-50 text-green-700"}`}>{msg.text}</div>}
+      <GistSyncPanel drive={drive} />
+
+      <div className="bg-white rounded-2xl shadow-sm p-4 space-y-3">
+        <div className="text-sm font-semibold">資料備份</div>
+        <button onClick={exportJSON} className="w-full py-3 rounded-xl text-sm font-medium text-white" style={{background:"var(--brand)"}}>📤 匯出 JSON 備份</button>
+        <label className="block w-full py-3 rounded-xl text-sm font-medium text-center border-2 border-dashed border-gray-200 text-gray-500 cursor-pointer hover:border-[color:var(--brand)]">
+          📥 匯入 JSON 備份
+          <input type="file" accept=".json" className="hidden" onChange={importJSON}/>
+        </label>
+        <label className="block w-full py-3 rounded-xl text-sm font-medium text-center border-2 border-dashed border-gray-200 text-gray-500 cursor-pointer hover:border-[color:var(--brand)]">
+          📊 匯入 Zaim CSV
+          <input type="file" accept=".csv,.txt" className="hidden" onChange={importCSV}/>
+        </label>
+      </div>
+      <div className="bg-white rounded-2xl shadow-sm p-4">
+        <div className="text-sm font-semibold mb-3">統計</div>
+        <div className="text-sm text-gray-500">總記帳筆數：<span className="font-semibold text-gray-800">{store.entries.length}</span></div>
+      </div>
+      <button onClick={()=>{
+        if(!confirm("清除 App 快取並重新載入？（記帳資料不受影響）")) return;
+        if("serviceWorker" in navigator){
+          navigator.serviceWorker.getRegistrations().then(regs=>{
+            Promise.all(regs.map(r=>r.unregister())).then(()=>{
+              caches.keys().then(keys=>Promise.all(keys.map(k=>caches.delete(k)))).then(()=>{
+                window.location.reload(true);
+              });
+            });
+          });
+        } else { window.location.reload(true); }
+      }} className="w-full py-3 rounded-xl text-sm font-medium text-blue-500 bg-blue-50">🔄 清除 App 快取並更新</button>
+      <button onClick={clearAll} className="w-full py-3 rounded-xl text-sm font-medium text-red-500 bg-red-50">🗑️ 清除全部資料</button>
+    </div>
+    </>
+  );
+}
+
+/* ===================== 記帳 Modal ===================== */
+function EntryModal({entry, store, base, rates, onSave, onDelete, onClose}) {
+  const isEdit = !!entry;
+  const today = toISO(new Date());
+  const [type, setType] = useState(entry?.type || "expense");
+  const [category, setCategory] = useState(entry?.category || "");
+  const [amount, setAmount] = useState(entry?.amount ? String(entry.amount) : "");
+  const [currency, setCurrency] = useState(entry?.currency || base);
+  const [date, setDate] = useState(entry?.date || today);
+  const [memo, setMemo] = useState(entry?.memo || "");
+  const [catTab, setCatTab] = useState(null);
+  const inputRef = useRef(null);
+
+  // 只喺桌面（滑鼠裝置）自動 focus 金額欄；手機先唔自動彈鍵盤，否則鍵盤一彈視窗縮細 modal 內容消失
+  useEffect(()=>{
+    if (window.matchMedia && window.matchMedia("(pointer: fine)").matches) {
+      setTimeout(()=>inputRef.current?.focus(), 200);
+    }
+  },[]);
+
+  const cats = store.categories[type];
+  const parentCats = cats.filter(c=>!c.parentId);
+  const selectedCat = cats.find(c=>c.id===category);
+  const parentOfSelected = selectedCat?.parentId ? cats.find(c=>c.id===selectedCat.parentId) : null;
+
+  const convertedBase = amount ? toBase(parseFloat(amount)||0, currency, rates) : 0;
+
+  const save = () => {
+    const v = parseFloat(amount);
+    if (!v || v<=0 || !category) return;
+    onSave({ id: entry?.id || Date.now()+"_"+Math.random().toString(36).slice(2), type, category, amount:v, currency, date, memo });
+  };
+
+  return (
+    <div className="fixed inset-0 z-40">
+      {/* Backdrop */}
+      <div className="absolute inset-0 bg-black/40" onClick={onClose}/>
+      {/* Sheet — 用 dvh 讓高度自動排除手機鍵盤；min-h-0 讓 flex-1 真正縮放 */}
+      <div className="sheet absolute bottom-0 left-0 right-0 bg-white rounded-t-3xl flex flex-col z-10"
+        style={{maxHeight:"min(95vh, 95dvh)"}}>
+        {/* Header */}
+        <div className="px-4 py-4 flex items-center justify-between border-b border-gray-100 flex-shrink-0">
+          <button onClick={onClose} className="text-sm text-gray-400">取消</button>
+          <div className="text-base font-semibold">{isEdit?"編輯記帳":"新增記帳"}</div>
+          <button onClick={save} className="text-sm font-semibold" style={{color:"var(--brand)"}}>確定</button>
+        </div>
+
+        <div className="overflow-y-auto flex-1 min-h-0 no-scrollbar px-4 py-3 space-y-4">
+          {/* 收支切換 */}
+          <div className="flex gap-2">
+            {[["expense","支出","var(--expense)"],["income","收入","var(--income)"]].map(([t,l,c])=>(
+              <button key={t} onClick={()=>{setType(t);setCategory("");}}
+                className={`flex-1 py-2.5 rounded-xl text-sm font-semibold transition-all ${type===t?"text-white shadow-md":"bg-gray-100 text-gray-500"}`}
+                style={{background:type===t?c:undefined}}>{l}</button>
+            ))}
+          </div>
+
+          {/* 金額 */}
+          <div className="bg-gray-50 rounded-2xl p-4">
+            <div className="flex items-center gap-3">
+              <select value={currency} onChange={e=>setCurrency(e.target.value)}
+                className="bg-white border border-gray-200 rounded-xl px-3 py-2 text-sm font-medium">
+                {CURRENCIES.map(c=><option key={c.code} value={c.code}>{c.code}</option>)}
+              </select>
+              <input ref={inputRef} type="number" value={amount} placeholder="0.0" step="0.1" min="0"
+                onChange={e=>setAmount(e.target.value)}
+                className="flex-1 bg-transparent text-3xl font-bold text-right outline-none placeholder-gray-300"/>
+            </div>
+            {currency!==base&&amount&&(
+              <div className="text-xs text-gray-400 text-right mt-1">≈ {fmt(convertedBase,base)}</div>
+            )}
+          </div>
+
+          {/* 分類選擇 */}
+          <div>
+            <div className="text-sm text-gray-500 mb-2">分類</div>
+            <div className="grid grid-cols-4 gap-2">
+              {parentCats.map(parent=>{
+                const children=cats.filter(c=>c.parentId===parent.id);
+                const isParentSel=category===parent.id||(selectedCat?.parentId===parent.id);
+                return (
+                  <React.Fragment key={parent.id}>
+                    <button onClick={()=>{ if(children.length===0){setCategory(parent.id);setCatTab(null);} else setCatTab(catTab===parent.id?null:parent.id); }}
+                      className={`flex flex-col items-center py-2.5 rounded-2xl text-xs transition-all ${isParentSel?"text-white shadow-md":""}`}
+                      style={{background:isParentSel?parent.color+"CC":"#F8F9FA"}}>
+                      <span className="text-xl mb-0.5">{parent.icon}</span>
+                      <span className="truncate w-full text-center px-1">{parent.name}</span>
+                      {children.length>0&&<span style={{color:isParentSel?"rgba(255,255,255,0.8)":"#aaa"}} className="text-[8px] mt-0.5">▼</span>}
+                    </button>
+                    {catTab===parent.id&&children.map(c=>(
+                      <button key={c.id} onClick={()=>{setCategory(c.id);setCatTab(null);}}
+                        className={`flex flex-col items-center py-2.5 rounded-2xl text-xs transition-all ${category===c.id?"text-white shadow-md":""}`}
+                        style={{background:category===c.id?c.color+"CC":"#EEF0F5"}}>
+                        <span className="text-xl mb-0.5">{c.icon}</span>
+                        <span className="truncate w-full text-center px-1">{c.name}</span>
+                      </button>
+                    ))}
+                  </React.Fragment>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* 日期 */}
+          <div>
+            <div className="text-sm text-gray-500 mb-2">日期</div>
+            <input type="date" value={date} onChange={e=>setDate(e.target.value)}
+              className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm"/>
+          </div>
+
+          {/* 備注 */}
+          <div>
+            <div className="text-sm text-gray-500 mb-2">備注</div>
+            <input type="text" value={memo} onChange={e=>setMemo(e.target.value)} placeholder="選填"
+              className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm"/>
+          </div>
+
+          {/* 刪除 */}
+          {isEdit&&(
+            <button onClick={()=>onDelete(entry.id)} className="w-full py-3 rounded-xl text-sm font-medium text-red-500 bg-red-50">
+              刪除此記錄
+            </button>
+          )}
+          <div className="h-4"/>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ===================== 啟動 ===================== */
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("sw.js").catch(()=>{});
+}
+</script>
+</body>
+</html>

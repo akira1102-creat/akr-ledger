@@ -1,0 +1,17 @@
+{
+  "name": "AKR記帳本",
+  "short_name": "AKR記帳本",
+  "description": "簡潔記帳 PWA，仿 Zaim 風格，支援多幣種、預算、圖表",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#F7F7F9",
+  "theme_color": "#F85C70",
+  "lang": "zh-Hant",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ],
+  "categories": ["finance", "productivity", "lifestyle"]
+}
