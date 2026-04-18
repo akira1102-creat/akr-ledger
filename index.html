@@ -1753,6 +1753,7 @@ function EntryModal({entry, store, base, rates, onSave, onDelete, onClose}) {
   const [memo, setMemo] = useState(entry?.memo || "");
   const [catTab, setCatTab] = useState(null);
   const inputRef = useRef(null);
+  const memoRef = useRef(null);
 
   // 只喺桌面（滑鼠裝置）自動 focus 金額欄；手機先唔自動彈鍵盤，否則鍵盤一彈視窗縮細 modal 內容消失
   useEffect(()=>{
@@ -1818,31 +1819,48 @@ function EntryModal({entry, store, base, rates, onSave, onDelete, onClose}) {
           {/* 分類選擇 */}
           <div>
             <div className="text-sm text-gray-500 mb-2">分類</div>
+            {/* 第一層：大類 */}
             <div className="grid grid-cols-4 gap-2">
               {parentCats.map(parent=>{
                 const children=cats.filter(c=>c.parentId===parent.id);
-                const isParentSel=category===parent.id||(selectedCat?.parentId===parent.id);
+                const directSel=category===parent.id;
+                const childSel=selectedCat?.parentId===parent.id;
+                const expanded=catTab===parent.id;
+                const bg=directSel?parent.color+"CC":childSel?parent.color+"44":expanded?parent.color+"22":"#F8F9FA";
+                const txt=directSel?"text-white":"";
                 return (
-                  <React.Fragment key={parent.id}>
-                    <button onClick={()=>{ if(children.length===0){setCategory(parent.id);setCatTab(null);} else setCatTab(catTab===parent.id?null:parent.id); }}
-                      className={`flex flex-col items-center py-2.5 rounded-2xl text-xs transition-all ${isParentSel?"text-white shadow-md":""}`}
-                      style={{background:isParentSel?parent.color+"CC":"#F8F9FA"}}>
-                      <span className="text-xl mb-0.5">{parent.icon}</span>
-                      <span className="truncate w-full text-center px-1">{parent.name}</span>
-                      {children.length>0&&<span style={{color:isParentSel?"rgba(255,255,255,0.8)":"#aaa"}} className="text-[8px] mt-0.5">▼</span>}
-                    </button>
-                    {catTab===parent.id&&children.map(c=>(
-                      <button key={c.id} onClick={()=>{setCategory(c.id);setCatTab(null);}}
-                        className={`flex flex-col items-center py-2.5 rounded-2xl text-xs transition-all ${category===c.id?"text-white shadow-md":""}`}
-                        style={{background:category===c.id?c.color+"CC":"#EEF0F5"}}>
-                        <span className="text-xl mb-0.5">{c.icon}</span>
-                        <span className="truncate w-full text-center px-1">{c.name}</span>
-                      </button>
-                    ))}
-                  </React.Fragment>
+                  <button key={parent.id}
+                    onClick={()=>{ if(children.length===0){setCategory(parent.id);setCatTab(null);} else setCatTab(expanded?null:parent.id); }}
+                    className={`flex flex-col items-center py-2.5 rounded-2xl text-xs transition-all ${txt} ${expanded?"ring-2 ring-offset-1":""}`}
+                    style={{background:bg, ...(expanded?{ringColor:parent.color}:{})}}>
+                    <span className="text-xl mb-0.5">{parent.icon}</span>
+                    <span className="truncate w-full text-center px-1">{parent.name}</span>
+                    {children.length>0&&<span className={`text-[8px] mt-0.5 ${directSel?"text-white/70":"text-gray-400"}`}>{expanded?"▲":"▼"}</span>}
+                  </button>
                 );
               })}
             </div>
+            {/* 第二層：子分類（獨立區塊，有顏色邊框） */}
+            {catTab&&(()=>{
+              const parent=cats.find(c=>c.id===catTab);
+              const children=cats.filter(c=>c.parentId===catTab);
+              if(!parent||!children.length) return null;
+              return (
+                <div className="mt-2 rounded-2xl p-3 border-l-4" style={{background:parent.color+"11", borderColor:parent.color}}>
+                  <div className="text-[10px] font-semibold mb-2" style={{color:parent.color}}>{parent.icon} {parent.name} 的子分類</div>
+                  <div className="grid grid-cols-4 gap-2">
+                    {children.map(c=>(
+                      <button key={c.id} onClick={()=>{setCategory(c.id);setCatTab(null);}}
+                        className={`flex flex-col items-center py-2 rounded-xl text-xs transition-all ${category===c.id?"text-white shadow-md":""}`}
+                        style={{background:category===c.id?c.color+"CC":"#fff"}}>
+                        <span className="text-lg mb-0.5">{c.icon}</span>
+                        <span className="truncate w-full text-center px-0.5">{c.name}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
           </div>
 
           {/* 日期 */}
@@ -1855,7 +1873,8 @@ function EntryModal({entry, store, base, rates, onSave, onDelete, onClose}) {
           {/* 備注 */}
           <div>
             <div className="text-sm text-gray-500 mb-2">備注</div>
-            <input type="text" value={memo} onChange={e=>setMemo(e.target.value)} placeholder="選填"
+            <input ref={memoRef} type="text" value={memo} onChange={e=>setMemo(e.target.value)} placeholder="選填"
+              onFocus={()=>setTimeout(()=>memoRef.current?.scrollIntoView({behavior:"smooth",block:"nearest"}),300)}
               className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm"/>
           </div>
 
