@@ -555,6 +555,34 @@ function SortableList({ items, renderItem, onReorder, itemHeight = 68 }) {
   );
 }
 
+/* ===================== Swipe / Back helpers ===================== */
+const _backStack = [];
+const pushBack = fn => _backStack.push(fn);
+const popBack  = fn => { const i=_backStack.lastIndexOf(fn); if(i>=0) _backStack.splice(i,1); };
+const consumeBack = () => { if(_backStack.length>0){ _backStack[_backStack.length-1](); return true; } return false; };
+
+function useSwipeNav({onSwipeLeft, onSwipeRight, onBack}={}) {
+  const t0   = useRef(null);
+  const cbL  = useRef(onSwipeLeft);
+  const cbR  = useRef(onSwipeRight);
+  const cbB  = useRef(onBack);
+  useEffect(() => { cbL.current=onSwipeLeft; cbR.current=onSwipeRight; cbB.current=onBack; });
+  const onTouchStart = useCallback(e => {
+    const t = e.touches[0];
+    t0.current = {x:t.clientX, y:t.clientY, edge:t.clientX<28};
+  }, []);
+  const onTouchEnd = useCallback(e => {
+    if(!t0.current) return;
+    const s=t0.current; t0.current=null;
+    const dx=e.changedTouches[0].clientX-s.x;
+    const dy=e.changedTouches[0].clientY-s.y;
+    if(Math.abs(dx)<52||Math.abs(dy)>Math.abs(dx)*0.75) return;
+    if(dx>0){ if(s.edge&&cbB.current){cbB.current();return;} cbR.current?.(); }
+    else { cbL.current?.(); }
+  }, []);
+  return {onTouchStart, onTouchEnd};
+}
+
 /* ===================== App ===================== */
 function App() {
   const [store, setStore] = useState(loadStore);
@@ -567,11 +595,25 @@ function App() {
     setTab(newTab);
   };
   const [entryOpen, setEntryOpen] = useState(false);
+  const [entryCloseSignal, setEntryCloseSignal] = useState(0);
   const [editing, setEditing] = useState(null);
   const [viewMonth, setViewMonth] = useState(() => { const d=new Date(); return monthKey(d); });
   const drive = useGistSync(store, setStore);
 
   useEffect(() => { saveStore(store); }, [store]);
+
+  const handleBack = useCallback(() => {
+    if(consumeBack()) return;
+    if(entryOpen){ setEntryCloseSignal(s=>s+1); return; }
+    if(tab!=="home"){ changeTab("home"); }
+  }, [entryOpen, tab, changeTab]);
+
+  useEffect(() => {
+    history.pushState({akr:1},"");
+    const onPop = () => { handleBack(); history.pushState({akr:1},""); };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, [handleBack]);
 
   const base = store.settings.baseCurrency;
   const rates = store.settings.rates;
@@ -651,7 +693,11 @@ function App() {
         </div>
       </header>
 
-      <main className="safe-bottom" style={{overflow:"hidden"}}>
+      <main className="safe-bottom" style={{overflow:"hidden"}} {...useSwipeNav({
+        onSwipeLeft:()=>{ if(entryOpen||tab==="set") return; const i=TAB_ORDER.indexOf(tab); if(i<TAB_ORDER.length-1) changeTab(TAB_ORDER[i+1]); },
+        onSwipeRight:()=>{ if(entryOpen||tab==="set") return; const i=TAB_ORDER.indexOf(tab); if(i>0) changeTab(TAB_ORDER[i-1]); },
+        onBack: handleBack,
+      })}>
         <div key={tab} className={tabDir>0?"tab-slide-right":tabDir<0?"tab-slide-left":""}>
           {tab==="home"  && <HomeView store={store} rates={rates} base={base} entries={monthEntries} onEdit={openEdit} onDelete={removeEntry} monthTotals={monthTotals} viewMonth={viewMonth} />}
           {tab==="cal"   && <CalendarView store={store} rates={rates} base={base} viewMonth={viewMonth} entries={monthEntries} onEdit={openEdit} />}
@@ -682,6 +728,7 @@ function App() {
           onSave={e=>{upsertEntry(e);setEntryOpen(false);}}
           onDelete={id=>{removeEntry(id);setEntryOpen(false);}}
           onClose={()=>setEntryOpen(false)}
+          closeSignal={entryCloseSignal}
         />
       )}
     </div>
@@ -978,6 +1025,18 @@ function ChartView({store, rates, base, entries, allEntries, viewMonth, onEdit})
   const [selectedCatId, setSelectedCatId] = useState(null);
   const [selectedChildId, setSelectedChildId] = useState(null);
   const [panelClosing, setPanelClosing] = useState(false);
+  const selectedChildIdRef = useRef(selectedChildId);
+  useEffect(()=>{ selectedChildIdRef.current=selectedChildId; },[selectedChildId]);
+
+  const closePanel = useCallback(()=>{
+    setPanelClosing(true);
+    setTimeout(()=>{
+      setPanelClosing(false);
+      if(selectedChildIdRef.current){ setSelectedChildId(null); }
+      else{ setSelectedCatId(null); setSelectedChildId(null); }
+    },230);
+  },[]);
+
   const now = new Date();
 
   const { rangeLabel, rangeEntries } = useMemo(()=>{
@@ -1041,6 +1100,17 @@ function ChartView({store, rates, base, entries, allEntries, viewMonth, onEdit})
       .map(c=>({id:c.id,value:childMap[c.id],cat:c}))
       .sort((a,b)=>b.value-a.value);
   },[selectedCatId,rangeEntries,expCatMap,rates,store.categories.expense]);
+
+  const panelVisible = useMemo(()=>
+    !!(selectedChildId||(childExpData.length===0&&selectedCatId))&&!panelClosing,
+    [selectedChildId,selectedCatId,panelClosing]
+  );
+
+  useEffect(()=>{
+    if(!panelVisible) return;
+    pushBack(closePanel);
+    return ()=>popBack(closePanel);
+  },[panelVisible,closePanel]);
 
   const filteredEntries=useMemo(()=>{
     const filterCatId=selectedChildId||(childExpData.length===0?selectedCatId:null);
@@ -1193,14 +1263,6 @@ function ChartView({store, rates, base, entries, allEntries, viewMonth, onEdit})
     {(()=>{
       const panelCatId=selectedChildId||(childExpData.length===0?selectedCatId:null);
       const panelCat=panelCatId?allCatMap[panelCatId]:null;
-      const closePanel=()=>{
-        setPanelClosing(true);
-        setTimeout(()=>{
-          setPanelClosing(false);
-          if(selectedChildId){setSelectedChildId(null);}
-          else{setSelectedCatId(null);setSelectedChildId(null);}
-        },230);
-      };
       if(!panelCat&&!panelClosing) return null;
       return (
         <div className={`fixed inset-0 z-30 bg-black/30 flex items-end ${panelClosing?"fade-out":"fade-in"}`} onClick={closePanel}>
@@ -1349,8 +1411,12 @@ function SettingsView({store, setStore, drive}) {
     setTabDir(tabs.findIndex(t=>t[0]===k)>tabs.findIndex(t=>t[0]===tab)?1:-1);
     setTab(k);
   };
+  const settingsSwipe = useSwipeNav({
+    onSwipeLeft:()=>{ const i=tabs.findIndex(t=>t[0]===tab); if(i<tabs.length-1) changeSettingsTab(tabs[i+1][0]); },
+    onSwipeRight:()=>{ const i=tabs.findIndex(t=>t[0]===tab); if(i>0) changeSettingsTab(tabs[i-1][0]); },
+  });
   return (
-    <div className="px-3 pt-3 space-y-3">
+    <div className="px-3 pt-3 space-y-3" {...settingsSwipe}>
       <div className="bg-white rounded-2xl shadow-sm p-1 flex gap-1">
         {tabs.map(([k,l])=>(
           <button key={k} onClick={()=>changeSettingsTab(k)}
@@ -1846,9 +1912,10 @@ function DataSettings({store, setStore, drive}) {
 }
 
 /* ===================== 記帳 Modal ===================== */
-function EntryModal({entry, store, base, rates, onSave, onDelete, onClose}) {
+function EntryModal({entry, store, base, rates, onSave, onDelete, onClose, closeSignal}) {
   const [exiting, setExiting] = React.useState(false);
   const handleClose = React.useCallback(()=>{ setExiting(true); setTimeout(onClose,230); },[onClose]);
+  useEffect(()=>{ if(closeSignal>0) handleClose(); },[closeSignal]);
   const isEdit = !!entry;
   const today = toISO(new Date());
   const [type, setType] = useState(entry?.type || "expense");
