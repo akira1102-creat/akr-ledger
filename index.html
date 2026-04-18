@@ -753,66 +753,18 @@ function HomeView({store, rates, base, entries, onEdit, onDelete, monthTotals, v
         {tb===0&&<div className="mt-1 text-[11px] text-gray-400 text-center">設定總預算後可顯示剩餘可用金額</div>}
       </div>
 
-      {/* 本月收支 + mini donut */}
+      {/* 本月收支 */}
       <div className="bg-white rounded-2xl shadow-sm p-4">
         <div className="text-sm font-semibold mb-3">{ym1} 年 {ym2} 月 收支</div>
-        <div className="flex items-center gap-3">
-          <div className="flex-1 space-y-1.5 min-w-0">
-            <div className="flex justify-between text-xs"><span className="text-gray-500">收入</span><span className="amount-font text-[color:var(--income)]">{fmt(monthTotals.inc,base)}</span></div>
-            <div className="flex justify-between text-xs"><span className="text-gray-500">支出</span><span className="amount-font text-[color:var(--expense)]">{fmt(monthTotals.exp,base)}</span></div>
-            <div className="flex justify-between text-sm font-semibold border-t border-gray-100 pt-1.5">
-              <span>結餘</span>
-              <span className={`amount-font ${monthTotals.net>=0?"text-gray-800":"text-[color:var(--expense)]"}`}>{fmt(monthTotals.net,base)}</span>
-            </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="rounded-2xl p-3 text-center" style={{background:"#FFF5F5"}}>
+            <div className="text-xs text-gray-400 mb-1">支出</div>
+            <div className="text-base font-bold amount-font text-[color:var(--expense)]">{fmt(monthTotals.exp,base)}</div>
           </div>
-          {(()=>{
-            const total=Object.values(topCatMap).reduce((a,b)=>a+b,0);
-            if(!total) return <div className="w-36 h-36 rounded-full bg-gray-100 grid place-items-center text-gray-400 text-xs flex-shrink-0">無支出</div>;
-            const size=144, r=52, strokeW=22, circ=2*Math.PI*r; let acc=0;
-            const topP=store.categories.expense.filter(c=>!c.parentId&&(topCatMap[c.id]||0)>0);
-            // Compute label positions for top 3
-            const top3=topP.slice(0,3);
-            const labelElems=[];
-            let labelAcc=0;
-            topP.forEach((c,i)=>{
-              const frac=(topCatMap[c.id]||0)/total;
-              if(i<3){
-                const midAngle=((labelAcc+frac/2)*360-90)*Math.PI/180;
-                const lr=r; // label on ring
-                const lx=size/2+lr*Math.cos(midAngle);
-                const ly=size/2+lr*Math.sin(midAngle);
-                labelElems.push({c,frac,lx,ly,midAngle});
-              }
-              labelAcc+=frac;
-            });
-            return (
-              <div style={{position:"relative",width:size,height:size,flexShrink:0}}>
-                <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{overflow:"visible"}}>
-                  <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="#F1F1F4" strokeWidth={strokeW}/>
-                  {topP.map(c=>{
-                    const frac=(topCatMap[c.id]||0)/total, dash=`${frac*circ} ${circ}`, rot=(acc/total)*360-90;
-                    acc+=(topCatMap[c.id]||0);
-                    return <circle key={c.id} cx={size/2} cy={size/2} r={r} fill="none" stroke={c.color} strokeWidth={strokeW} strokeDasharray={dash} strokeDashoffset="0" transform={`rotate(${rot} ${size/2} ${size/2})`}/>;
-                  })}
-                  {/* Labels for top 3 */}
-                  {labelElems.map(({c,frac,lx,ly,midAngle},i)=>{
-                    if(frac<0.05) return null;
-                    const labelR=r+strokeW/2+16;
-                    const tx=size/2+labelR*Math.cos(midAngle);
-                    const ty=size/2+labelR*Math.sin(midAngle);
-                    const anchor=tx<size/2?"end":"start";
-                    return (
-                      <g key={c.id}>
-                        <line x1={lx} y1={ly} x2={tx} y2={ty} stroke={c.color} strokeWidth="1" opacity="0.7"/>
-                        <text x={tx+(anchor==="start"?3:-3)} y={ty} textAnchor={anchor} dominantBaseline="middle"
-                          fontSize="9" fontWeight="600" fill={c.color}>{c.name}</text>
-                      </g>
-                    );
-                  })}
-                </svg>
-              </div>
-            );
-          })()}
+          <div className="rounded-2xl p-3 text-center" style={{background:"#F0FBF4"}}>
+            <div className="text-xs text-gray-400 mb-1">收入</div>
+            <div className="text-base font-bold amount-font text-[color:var(--income)]">{fmt(monthTotals.inc,base)}</div>
+          </div>
         </div>
         {topCats.length>0&&(
           <div className="mt-3 grid grid-cols-2 gap-1.5">
@@ -1049,7 +1001,17 @@ function ChartView({store, rates, base, entries, allEntries, viewMonth}) {
         ):(
           <div className="flex flex-col items-center">
             <LargeDonut data={pieData} total={totalExp} base={base} onSelect={setSelectedCatId} selectedId={selectedCatId}/>
-            <div className="text-xs text-gray-400 mt-1">{pieData.length} 個分類</div>
+            <div className="w-full mt-4 space-y-2">
+              {pieData.map(d=>(
+                <button key={d.id} onClick={()=>setSelectedCatId(d.id===selectedCatId?null:d.id)}
+                  className={`w-full flex items-center gap-2.5 px-2 py-1.5 rounded-xl transition-all ${d.id===selectedCatId?"bg-gray-100":""}`}>
+                  <div className="w-3 h-3 rounded-full flex-shrink-0" style={{background:d.cat.color}}/>
+                  <span className="text-sm flex-1 text-left text-gray-700">{d.cat.icon} {d.cat.name}</span>
+                  <span className="text-xs text-gray-400 w-8 text-right">{Math.round(d.value/totalExp*100)}%</span>
+                  <span className="text-sm amount-font text-gray-800 w-24 text-right">{fmt(d.value,base)}</span>
+                </button>
+              ))}
+            </div>
           </div>
         )}
       </div>
@@ -1206,9 +1168,7 @@ function AboutView() {
     <div className="space-y-3">
       <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
         <div className="flex flex-col items-center py-10 px-6">
-          <div className="w-20 h-20 rounded-3xl grid place-items-center text-4xl mb-4 shadow-md" style={{background:"var(--brand)"}}>
-            💴
-          </div>
+          <img src="icon-192.png" alt="AKR記帳本" className="w-20 h-20 rounded-3xl mb-4 shadow-md object-cover"/>
           <div className="text-xl font-bold mb-1">AKR記帳本</div>
           <div className="text-sm text-gray-400 mb-6">繁中 PWA 記帳應用</div>
           <div className="w-full space-y-3">
@@ -1226,7 +1186,7 @@ function AboutView() {
             </div>
             <div className="flex justify-between items-center py-3">
               <span className="text-sm text-gray-500">支援幣種</span>
-              <span className="text-sm text-gray-600">MOP · HKD · JPY · TWD</span>
+              <span className="text-sm text-gray-600">MOP · HKD · CNY · JPY · TWD</span>
             </div>
           </div>
         </div>
