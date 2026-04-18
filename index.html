@@ -124,8 +124,8 @@ function useGistSync(store, setStore) {
     const { _cloudSyncedAt, ...storeData } = parsed; // strip metadata
     return {
       storeData,
-      syncedAt: _cloudSyncedAt || null,   // embedded timestamp (new gists)
-      gistUpdatedAt: gist.updated_at || null, // GitHub's own updated_at (fallback for old gists)
+      syncedAt: _cloudSyncedAt || null,
+      gistUpdatedAt: gist.updated_at || null,
     };
   };
 
@@ -175,7 +175,7 @@ function useGistSync(store, setStore) {
         if (doImport) {
           const { storeData: cloudData } = await downloadGist(existingId, token);
           if (!cloudData || !cloudData.entries) throw new Error("雲端資料格式無效");
-          if (!cloudData.totalBudget) cloudData.totalBudget = 0;
+          normalizeStore(cloudData);
           justImportedRef.current = true;
           setStore(cloudData);
         } else {
@@ -239,19 +239,15 @@ function useGistSync(store, setStore) {
         const { storeData: cloudData, syncedAt: cloudSyncedAt, gistUpdatedAt } = await downloadGist(gistId, gistToken);
         if (!alive) return;
 
-        // Compare timestamps — prefer _cloudSyncedAt (embedded, reliable)
-        // Fall back to gist.updated_at for old gists that predate _cloudSyncedAt
-        const cloudMs = cloudSyncedAt
-          ? new Date(cloudSyncedAt).getTime()
-          : gistUpdatedAt ? new Date(gistUpdatedAt).getTime() : 0;
-        // Use saved.lastSync (initial localStorage value) — avoids stale closure issues
-        const localMs = saved?.lastSync ? new Date(saved.lastSync).getTime() : 0;
+        // Prefer embedded _cloudSyncedAt; fall back to gist.updated_at for old gists
+        const cloudMs = dateToMs(cloudSyncedAt) || dateToMs(gistUpdatedAt);
+        // Use saved.lastSync (closure at mount) — avoids stale state issues
+        const localMs = dateToMs(saved?.lastSync);
 
         if (cloudMs > localMs + 3000) {
           // ☁️ Cloud is newer — silently import
           if (cloudData && cloudData.entries) {
-            if (!cloudData.totalBudget) cloudData.totalBudget = 0;
-            if (!cloudData.budgets) cloudData.budgets = {};
+            normalizeStore(cloudData);
             justImportedRef.current = true;
             if (alive) setStore(cloudData);
           }
@@ -375,15 +371,19 @@ const defaultStore = () => ({
   totalBudget: 0,
   settings: { baseCurrency:"MOP", rates: DEFAULT_RATES },
 });
+// Ensure all required fields exist (used after load or cloud import)
+const normalizeStore = (s) => {
+  if (!s.totalBudget) s.totalBudget = 0;
+  if (!s.budgets) s.budgets = {};
+  if (!s.categories?.expense) s.categories = defaultStore().categories;
+  return s;
+};
+const dateToMs = s => s ? new Date(s).getTime() : 0;
 const loadStore = () => {
   try {
     const raw = localStorage.getItem(STORE_KEY);
     if (!raw) return defaultStore();
-    const s = JSON.parse(raw);
-    if (!s.totalBudget) s.totalBudget = 0;
-    if (!s.budgets) s.budgets = {};
-    if (!s.categories?.expense) s.categories = defaultStore().categories;
-    return s;
+    return normalizeStore(JSON.parse(raw));
   } catch { return defaultStore(); }
 };
 const saveStore = s => { try { localStorage.setItem(STORE_KEY, JSON.stringify(s)); } catch {} };
