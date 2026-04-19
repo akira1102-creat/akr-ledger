@@ -34,7 +34,7 @@
 - 最近記帳列表
 
 ### 💱 多幣值
-- 支援 MOP、HKD、CNY、USD、JPY、EUR、TWD、GBP、KRW、SGD
+- 支援 MOP、HKD、CNY、JPY、TWD
 - 切換基準幣值不影響匯率數值
 - 手動編輯任一幣種匯率，其餘自動按比例調整
 - 一鍵同步最新匯率（Open Exchange Rates）
