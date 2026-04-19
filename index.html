@@ -1555,7 +1555,6 @@ function BasicSettings({store, setStore}) {
         <div className="text-[10px] text-gray-400 mt-2">點擊數值可編輯；修改任一項其他幣種按比例自動調整。資料來源：Open Exchange Rates</div>
       </div>
     </div>
-    </div>
     {rateCalc&&(
       <div className="fixed inset-0 z-50" onClick={()=>setRateCalc(null)}>
         <div className="absolute inset-x-0 bottom-0 bg-white shadow-2xl rounded-t-3xl" onClick={e=>e.stopPropagation()}>
