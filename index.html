@@ -630,9 +630,13 @@ function App() {
     if(tabRef.current!=="home"){ changeTab("home"); }
   }, [changeTab]);
 
-  // No history.pushState: iOS swipe-back has no previous entry to animate to,
-  // so the gesture does nothing (standalone) or exits to prior browser page.
-  // In-app back is handled entirely by useSwipeNav.
+  useEffect(() => {
+    history.pushState({akr:1},"");
+    history.pushState({akr:2},"");
+    const onPop = () => { history.pushState({akr:2},""); handleBack(); };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, [handleBack]);
 
   const base = store.settings.baseCurrency;
   const rates = store.settings.rates;
