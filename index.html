@@ -400,7 +400,15 @@ const loadStore = () => {
 const saveStore = s => { try { localStorage.setItem(STORE_KEY, JSON.stringify(s)); } catch {} };
 
 /* ===================== 金額格式化 ===================== */
-const toBase = (amount, currency, rates) => amount * (rates[currency]||1);
+const toBase = (amount, currency, rates, base) => amount * (rates[currency]||1) / (rates[base]||1);
+const evalExpr = (expr) => {
+  try {
+    const e = (expr||"").replace(/×/g,'*').replace(/÷/g,'/').replace(/−/g,'-').replace(/＋/g,'+');
+    // eslint-disable-next-line no-new-func
+    const r = Function('"use strict";return('+e+')')();
+    return isFinite(r)&&!isNaN(r)&&r>0 ? Math.round(r*10000)/10000 : null;
+  } catch { return null; }
+};
 const fmt = (v, currency) => {
   const cur = CURRENCIES.find(c=>c.code===currency) || CURRENCIES[0];
   return `${cur.symbol} ${Math.abs(v).toLocaleString("en-US", {minimumFractionDigits:1, maximumFractionDigits:1})}`;
@@ -634,13 +642,13 @@ function App() {
   const monthTotals = useMemo(() => {
     let inc=0, exp=0;
     monthEntries.forEach(e => {
-      const v = toBase(e.amount, e.currency, rates);
+      const v = toBase(e.amount, e.currency, rates, base);
       if (e.type==="income") inc+=v; else exp+=v;
     });
     const tb = store.totalBudget || 0;
     const net = tb > 0 ? tb - exp + inc : inc - exp;
     return { inc, exp, net };
-  }, [monthEntries, rates, store.totalBudget]);
+  }, [monthEntries, rates, base, store.totalBudget]);
 
   const upsertEntry = (entry) => {
     setStore(s => {
@@ -747,8 +755,8 @@ function HomeView({store, rates, base, entries, onEdit, onDelete, monthTotals, v
   weekStart.setDate(now.getDate() - now.getDay());
   const weekStartISO = toISO(weekStart);
 
-  const todayExp = useMemo(()=>entries.filter(e=>e.type==="expense"&&e.date===todayISO).reduce((s,e)=>s+toBase(e.amount,e.currency,rates,base),0),[entries,rates,todayISO]);
-  const weekExp  = useMemo(()=>entries.filter(e=>e.type==="expense"&&e.date>=weekStartISO).reduce((s,e)=>s+toBase(e.amount,e.currency,rates,base),0),[entries,rates,weekStartISO]);
+  const todayExp = useMemo(()=>entries.filter(e=>e.type==="expense"&&e.date===todayISO).reduce((s,e)=>s+toBase(e.amount,e.currency,rates,base),0),[entries,rates,base,todayISO]);
+  const weekExp  = useMemo(()=>entries.filter(e=>e.type==="expense"&&e.date>=weekStartISO).reduce((s,e)=>s+toBase(e.amount,e.currency,rates,base),0),[entries,rates,base,weekStartISO]);
   const monthExp = monthTotals.exp;
   const tb = store.totalBudget || 0;
 
@@ -769,7 +777,7 @@ function HomeView({store, rates, base, entries, onEdit, onDelete, monthTotals, v
       map[topId]=(map[topId]||0)+toBase(e.amount,e.currency,rates,base);
     });
     return map;
-  },[entries,rates]);
+  },[entries,rates,base]);
 
   const topCats = store.categories.expense.filter(c=>!c.parentId&&(topCatMap[c.id]||0)>0)
     .sort((a,b)=>(topCatMap[b.id]||0)-(topCatMap[a.id]||0)).slice(0,4);
@@ -941,7 +949,10 @@ function CalendarView({store, rates, base, viewMonth, entries, onEdit}) {
   const startDow = (first.getDay()+6)%7;
   const daysInMonth = new Date(y,m,0).getDate();
   const catMap = [...store.categories.expense,...store.categories.income].reduce((a,c)=>{a[c.id]=c;return a;},{});
-  const [selectedDay, setSelectedDay] = useState(null);
+  const [selectedDay, setSelectedDay] = useState(()=>{
+    const now=new Date();
+    return (now.getFullYear()===y&&now.getMonth()+1===m)?now.getDate():null;
+  });
 
   const dayMap = useMemo(()=>{
     const map={};
@@ -951,7 +962,7 @@ function CalendarView({store, rates, base, viewMonth, entries, onEdit}) {
       if(e.type==="income") map[e.date].inc+=v; else map[e.date].exp+=v;
     });
     return map;
-  },[entries,rates]);
+  },[entries,rates,base]);
 
   const dayEntries = useMemo(()=>{
     if(!selectedDay) return [];
@@ -1073,7 +1084,7 @@ function ChartView({store, rates, base, entries, allEntries, viewMonth, onEdit})
       map[topId]=(map[topId]||0)+toBase(e.amount,e.currency,rates,base);
     });
     return map;
-  },[rangeEntries,rates]);
+  },[rangeEntries,rates,base]);
 
   const incByCat = useMemo(()=>{
     const map={};
@@ -1082,7 +1093,7 @@ function ChartView({store, rates, base, entries, allEntries, viewMonth, onEdit})
       map[topId]=(map[topId]||0)+toBase(e.amount,e.currency,rates,base);
     });
     return map;
-  },[rangeEntries,rates]);
+  },[rangeEntries,rates,base]);
 
   const totalExp=Object.values(expByCat).reduce((a,b)=>a+b,0);
   const totalInc=Object.values(incByCat).reduce((a,b)=>a+b,0);
@@ -1104,7 +1115,7 @@ function ChartView({store, rates, base, entries, allEntries, viewMonth, onEdit})
       .filter(c=>c.parentId===selectedCatId&&(childMap[c.id]||0)>0)
       .map(c=>({id:c.id,value:childMap[c.id],cat:c}))
       .sort((a,b)=>b.value-a.value);
-  },[selectedCatId,rangeEntries,expCatMap,rates,store.categories.expense]);
+  },[selectedCatId,rangeEntries,expCatMap,rates,base,store.categories.expense]);
 
   const panelVisible = useMemo(()=>
     !!(selectedChildId||(childExpData.length===0&&selectedCatId))&&!panelClosing,
@@ -1451,24 +1462,31 @@ function BasicSettings({store, setStore}) {
   const rates = store.settings.rates;
   const [fetchingRates, setFetchingRates] = useState(false);
   const [rateMsg, setRateMsg] = useState("");
-  const setBase = (c) => setStore(s=>{
-    const old = s.settings.rates; const pivot = old[c]||1;
-    const newRates = Object.fromEntries(Object.entries(old).map(([k,v])=>[k, Math.round(v/pivot*10000)/10000]));
-    return {...s, settings:{...s.settings, baseCurrency:c, rates:newRates}};
-  });
+  const [rateCalc, setRateCalc] = useState(null); // {code, expr}
+
+  const openRateCalc = (code) => setRateCalc({code, expr: String(rates[code]||"")});
+  const handleRateKey = (key) => {
+    if(!rateCalc) return;
+    if(key==="✓"||key==="=") {
+      const r = evalExpr(rateCalc.expr);
+      if(r&&r>0) setRate(rateCalc.code, r);
+      if(key==="✓") setRateCalc(null);
+      else setRateCalc(rc=>({...rc, expr: r ? String(r) : rc.expr}));
+      return;
+    }
+    if(key==="AC"){ setRateCalc(rc=>({...rc, expr:""})); return; }
+    if(key==="⌫"){ setRateCalc(rc=>({...rc, expr:rc.expr.slice(0,-1)})); return; }
+    setRateCalc(rc=>({...rc, expr:rc.expr+key}));
+  };
+  const setBase = (c) => setStore(s=>({...s, settings:{...s.settings, baseCurrency:c}}));
   const setRate = (c, newV) => {
     const v = parseFloat(newV);
     if(!v || v<=0) return;
     setStore(s=>{
-      const old = s.settings.rates;
-      const base = s.settings.baseCurrency;
-      const oldV = old[c]||1;
-      const factor = v/oldV;
-      const newRates = Object.fromEntries(Object.entries(old).map(([k,r])=>{
-        if(k===base) return [k, 1];          // base always stays 1
-        if(k===c) return [k, v];             // edited currency set to new value
-        return [k, Math.round(r*factor*10000)/10000]; // others scale proportionally
-      }));
+      const old = s.settings.rates; const oldV = old[c]||1; const factor = v/oldV;
+      const newRates = Object.fromEntries(Object.entries(old).map(([k,r])=>
+        [k, k===c ? v : Math.round(r*factor*10000)/10000]
+      ));
       return {...s, settings:{...s.settings, rates:newRates}};
     });
   };
@@ -1519,19 +1537,37 @@ function BasicSettings({store, setStore}) {
         </div>
         {rateMsg&&<div className="text-xs mb-3 px-1" style={{color:rateMsg.startsWith("✅")?"#2ECC71":"#E74C3C"}}>{rateMsg}</div>}
         <div className="space-y-2">
-          {CURRENCIES.map(c=>(
-            <div key={c.code} className="flex items-center gap-3">
-              <span className={`text-sm w-10 ${c.code===base?"font-bold":"font-normal"}`} style={{color:c.code===base?"var(--brand)":"inherit"}}>{c.code}</span>
-              <input type="number" value={rates[c.code]} step="0.001" min="0.0001"
-                onChange={e=>setRate(c.code,e.target.value)}
-                className="flex-1 border border-gray-200 rounded-xl px-3 py-2 text-sm text-right"/>
-              <span className="text-xs text-gray-400 w-12 text-right">{c.code===base?"（主）":""}</span>
-            </div>
-          ))}
+          {CURRENCIES.map(c=>{
+            const active = rateCalc?.code===c.code;
+            return (
+              <div key={c.code} className={`flex items-center gap-3 rounded-xl px-2 py-1 cursor-pointer ${active?"ring-2 ring-[color:var(--brand)] bg-[color:var(--brand-soft)]":""}`}
+                onClick={()=>openRateCalc(c.code)}>
+                <span className={`text-sm w-10 ${c.code===base?"font-bold":"font-normal"}`} style={{color:c.code===base?"var(--brand)":"inherit"}}>{c.code}</span>
+                <div className="flex-1 border border-gray-200 rounded-xl px-3 py-2 text-sm text-right bg-white">
+                  {active ? (rateCalc.expr||<span className="text-gray-300">0</span>) : (rates[c.code]??"")}
+                </div>
+                <span className="text-xs text-gray-400 w-12 text-right">{c.code===base?"（主）":""}</span>
+              </div>
+            );
+          })}
         </div>
-        <div className="text-[10px] text-gray-400 mt-2">修改任一數值後，其他幣種按比例自動調整。匯率數據來源：Open Exchange Rates</div>
+        <div className="text-[10px] text-gray-400 mt-2">點擊數值可編輯；修改任一項其他幣種按比例自動調整。資料來源：Open Exchange Rates</div>
       </div>
     </div>
+    {rateCalc&&(
+      <div className="fixed inset-0 z-50" onClick={()=>setRateCalc(null)}>
+        <div className="absolute inset-x-0 bottom-0 bg-white shadow-2xl rounded-t-3xl" onClick={e=>e.stopPropagation()}>
+          <div className="px-4 pt-4 pb-1 flex items-center justify-between">
+            <span className="text-sm font-semibold text-gray-700">{rateCalc.code} 匯率</span>
+            <button onClick={()=>setRateCalc(null)} className="text-gray-400 text-lg">✕</button>
+          </div>
+          <div className="px-4 py-2 text-right text-3xl font-bold text-gray-800">
+            {rateCalc.expr||<span className="text-gray-300">0</span>}
+          </div>
+          <CalcPad expr={rateCalc.expr} onKey={handleRateKey}/>
+        </div>
+      </div>
+    )}
   );
 }
 
@@ -1998,15 +2034,6 @@ function EntryModal({entry, store, base, rates, onSave, onDelete, onClose, close
   const memoRef = useRef(null);
   const scrollRef = useRef(null);
 
-  const evalExpr = (expr) => {
-    try {
-      const e = expr.replace(/×/g,'*').replace(/÷/g,'/').replace(/−/g,'-').replace(/＋/g,'+');
-      // eslint-disable-next-line no-new-func
-      const r = Function('"use strict";return('+e+')')();
-      return isFinite(r)&&!isNaN(r) ? Math.round(r*10000)/10000 : null;
-    } catch { return null; }
-  };
-
   const handleCalcKey = (key) => {
     if(key==="AC"){ setCalcExpr(""); setAmount(""); return; }
     if(key==="⌫"){
@@ -2039,7 +2066,7 @@ function EntryModal({entry, store, base, rates, onSave, onDelete, onClose, close
   const selectedCat = cats.find(c=>c.id===category);
   const parentOfSelected = selectedCat?.parentId ? cats.find(c=>c.id===selectedCat.parentId) : null;
 
-  const convertedBase = amount ? toBase(parseFloat(amount)||0, currency, rates) : 0;
+  const convertedBase = amount ? toBase(parseFloat(amount)||0, currency, rates, base) : 0;
 
   const save = () => {
     const v = parseFloat(amount);
@@ -2053,7 +2080,8 @@ function EntryModal({entry, store, base, rates, onSave, onDelete, onClose, close
       confirmLabel="刪除" danger={true}
       onConfirm={()=>{ setDelConfirm(false); onDelete(entry.id); }}
       onCancel={()=>setDelConfirm(false)}/>
-    <div className={`fixed inset-0 z-40 bg-white flex flex-col sheet ${exiting?"sheet-exit":""}`}>
+    <div className={`fixed inset-0 z-40 bg-white flex flex-col sheet ${exiting?"sheet-exit":""}`}
+      onClick={()=>setCalcOpen(false)}>
       {/* Header */}
       <div className="px-4 py-4 flex items-center justify-between border-b border-gray-100 flex-shrink-0">
         <button onClick={handleClose} className="text-sm text-gray-400">取消</button>
@@ -2073,7 +2101,7 @@ function EntryModal({entry, store, base, rates, onSave, onDelete, onClose, close
 
         {/* 金額 */}
         <div className={`bg-gray-50 rounded-2xl p-4 overflow-hidden cursor-pointer ${calcOpen?"ring-2 ring-[color:var(--brand)]":""}`}
-          onClick={()=>{ if(!calcOpen){ setCalcExpr(amount||""); setCalcOpen(true); } }}>
+          onClick={e=>{ e.stopPropagation(); setCalcExpr(amount||""); setCalcOpen(true); }}>
           <div className="flex items-center gap-3 min-w-0">
             <select value={currency} onChange={e=>{e.stopPropagation();setCurrency(e.target.value);}}
               onClick={e=>e.stopPropagation()}
@@ -2159,7 +2187,7 @@ function EntryModal({entry, store, base, rates, onSave, onDelete, onClose, close
         )}
         <div className="h-4"/>
       </div>
-      {calcOpen && <CalcPad expr={calcExpr} onKey={handleCalcKey}/>}
+      {calcOpen && <div onClick={e=>e.stopPropagation()}><CalcPad expr={calcExpr} onKey={handleCalcKey}/></div>}
     </div>
     </>
   );
