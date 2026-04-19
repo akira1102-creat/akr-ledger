@@ -581,16 +581,21 @@ function useSwipeNav({onSwipeLeft, onSwipeRight, onBack}={}) {
     const t = e.touches[0];
     t0.current = {x:t.clientX, y:t.clientY, edge:t.clientX<28};
   }, []);
-  const onTouchEnd = useCallback(e => {
-    if(!t0.current) return;
-    const s=t0.current; t0.current=null;
-    const dx=e.changedTouches[0].clientX-s.x;
-    const dy=e.changedTouches[0].clientY-s.y;
-    if(Math.abs(dx)<52||Math.abs(dy)>Math.abs(dx)*0.75) return;
-    if(dx>0){ if(s.edge&&cbB.current){cbB.current();return;} cbR.current?.(); }
-    else { cbL.current?.(); }
+  // touchend on document so it fires even if finger slides off the element
+  useEffect(() => {
+    const onEnd = (e) => {
+      if(!t0.current) return;
+      const s=t0.current; t0.current=null;
+      const dx=e.changedTouches[0].clientX-s.x;
+      const dy=e.changedTouches[0].clientY-s.y;
+      if(Math.abs(dx)<52||Math.abs(dy)>Math.abs(dx)*0.75) return;
+      if(dx>0){ if(s.edge&&cbB.current){cbB.current();return;} cbR.current?.(); }
+      else { cbL.current?.(); }
+    };
+    document.addEventListener("touchend", onEnd);
+    return () => document.removeEventListener("touchend", onEnd);
   }, []);
-  return {onTouchStart, onTouchEnd};
+  return {onTouchStart};
 }
 
 /* ===================== App ===================== */
@@ -628,7 +633,19 @@ function App() {
     history.pushState({akr:1},"");
     const onPop = () => { handleBack(); history.pushState({akr:1},""); };
     window.addEventListener("popstate", onPop);
-    return () => window.removeEventListener("popstate", onPop);
+    // Block iOS Safari native swipe-back gesture on left edge.
+    // preventDefault() stops the browser's back animation (white screen);
+    // our useSwipeNav onTouchStart/onTouchEnd still fires and handles back.
+    const blockEdge = (e) => {
+      if (e.touches && e.touches[0] && e.touches[0].clientX < 20) {
+        e.preventDefault();
+      }
+    };
+    document.addEventListener("touchstart", blockEdge, { passive: false, capture: true });
+    return () => {
+      window.removeEventListener("popstate", onPop);
+      document.removeEventListener("touchstart", blockEdge, { capture: true });
+    };
   }, [handleBack]);
 
   const base = store.settings.baseCurrency;
