@@ -398,7 +398,7 @@ const loadStore = () => {
 const saveStore = s => { try { localStorage.setItem(STORE_KEY, JSON.stringify(s)); } catch {} };
 
 /* ===================== 金額格式化 ===================== */
-const toBase = (amount, currency, rates) => amount * (rates[currency] || 1);
+const toBase = (amount, currency, rates, base) => amount * (rates[currency]||1) / (rates[base]||1);
 const fmt = (v, currency) => {
   const cur = CURRENCIES.find(c=>c.code===currency) || CURRENCIES[0];
   return `${cur.symbol} ${Math.abs(v).toLocaleString("en-US", {minimumFractionDigits:1, maximumFractionDigits:1})}`;
@@ -559,7 +559,7 @@ function SortableList({ items, renderItem, onReorder, itemHeight = 68 }) {
 const _backStack = [];
 const pushBack = fn => _backStack.push(fn);
 const popBack  = fn => { const i=_backStack.lastIndexOf(fn); if(i>=0) _backStack.splice(i,1); };
-const consumeBack = () => { if(_backStack.length>0){ _backStack[_backStack.length-1](); return true; } return false; };
+const consumeBack = () => { if(_backStack.length>0){ _backStack.pop()(); return true; } return false; };
 
 function useSwipeNav({onSwipeLeft, onSwipeRight, onBack}={}) {
   const t0   = useRef(null);
@@ -589,11 +589,13 @@ function App() {
   const [tab, setTab] = useState("home");
   const [tabDir, setTabDir] = useState(0);
   const TAB_ORDER = ["home","cal","chart","set"];
-  const changeTab = (newTab) => {
-    if(newTab===tab) return;
-    setTabDir(TAB_ORDER.indexOf(newTab)>TAB_ORDER.indexOf(tab)?1:-1);
-    setTab(newTab);
-  };
+  const changeTab = useCallback((newTab) => {
+    setTab(cur => {
+      if(cur===newTab) return cur;
+      setTabDir(TAB_ORDER.indexOf(newTab)>TAB_ORDER.indexOf(cur)?1:-1);
+      return newTab;
+    });
+  }, []);
   const [entryOpen, setEntryOpen] = useState(false);
   const [entryCloseSignal, setEntryCloseSignal] = useState(0);
   const [editing, setEditing] = useState(null);
@@ -602,11 +604,16 @@ function App() {
 
   useEffect(() => { saveStore(store); }, [store]);
 
+  const tabRef = useRef(tab);
+  useEffect(()=>{ tabRef.current=tab; }, [tab]);
+  const entryOpenRef = useRef(entryOpen);
+  useEffect(()=>{ entryOpenRef.current=entryOpen; }, [entryOpen]);
+
   const handleBack = useCallback(() => {
     if(consumeBack()) return;
-    if(entryOpen){ setEntryCloseSignal(s=>s+1); return; }
-    if(tab!=="home"){ changeTab("home"); }
-  }, [entryOpen, tab, changeTab]);
+    if(entryOpenRef.current){ setEntryCloseSignal(s=>s+1); return; }
+    if(tabRef.current!=="home"){ changeTab("home"); }
+  }, [changeTab]);
 
   useEffect(() => {
     history.pushState({akr:1},"");
@@ -626,13 +633,13 @@ function App() {
   const monthTotals = useMemo(() => {
     let inc=0, exp=0;
     monthEntries.forEach(e => {
-      const v = toBase(e.amount, e.currency, rates);
+      const v = toBase(e.amount, e.currency, rates, base);
       if (e.type==="income") inc+=v; else exp+=v;
     });
     const tb = store.totalBudget || 0;
     const net = tb > 0 ? tb - exp + inc : inc - exp;
     return { inc, exp, net };
-  }, [monthEntries, rates, store.totalBudget]);
+  }, [monthEntries, rates, base, store.totalBudget]);
 
   const upsertEntry = (entry) => {
     setStore(s => {
@@ -736,11 +743,11 @@ function HomeView({store, rates, base, entries, onEdit, onDelete, monthTotals, v
   const now = new Date();
   const todayISO = toISO(now);
   const weekStart = new Date(now);
-  weekStart.setDate(now.getDate() - ((now.getDay()+6)%7));
+  weekStart.setDate(now.getDate() - now.getDay());
   const weekStartISO = toISO(weekStart);
 
-  const todayExp = useMemo(()=>entries.filter(e=>e.type==="expense"&&e.date===todayISO).reduce((s,e)=>s+toBase(e.amount,e.currency,rates),0),[entries,rates,todayISO]);
-  const weekExp  = useMemo(()=>entries.filter(e=>e.type==="expense"&&e.date>=weekStartISO).reduce((s,e)=>s+toBase(e.amount,e.currency,rates),0),[entries,rates,weekStartISO]);
+  const todayExp = useMemo(()=>entries.filter(e=>e.type==="expense"&&e.date===todayISO).reduce((s,e)=>s+toBase(e.amount,e.currency,rates,base),0),[entries,rates,base,todayISO]);
+  const weekExp  = useMemo(()=>entries.filter(e=>e.type==="expense"&&e.date>=weekStartISO).reduce((s,e)=>s+toBase(e.amount,e.currency,rates,base),0),[entries,rates,base,weekStartISO]);
   const monthExp = monthTotals.exp;
   const tb = store.totalBudget || 0;
 
@@ -758,10 +765,10 @@ function HomeView({store, rates, base, entries, onEdit, onDelete, monthTotals, v
     const map={};
     entries.filter(e=>e.type==="expense").forEach(e=>{
       const cat=expCatMap[e.category]; const topId=cat?.parentId||e.category;
-      map[topId]=(map[topId]||0)+toBase(e.amount,e.currency,rates);
+      map[topId]=(map[topId]||0)+toBase(e.amount,e.currency,rates,base);
     });
     return map;
-  },[entries,rates]);
+  },[entries,rates,base]);
 
   const topCats = store.categories.expense.filter(c=>!c.parentId&&(topCatMap[c.id]||0)>0)
     .sort((a,b)=>(topCatMap[b.id]||0)-(topCatMap[a.id]||0)).slice(0,4);
@@ -891,7 +898,7 @@ function HomeView({store, rates, base, entries, onEdit, onDelete, monthTotals, v
         <>
           <div className="text-xs text-gray-400 px-1">最近記帳明細</div>
           {groups.map(([date,list])=>{
-            const daySum=list.reduce((acc,e)=>{const v=toBase(e.amount,e.currency,rates);return e.type==="income"?acc+v:acc-v;},0);
+            const daySum=list.reduce((acc,e)=>{const v=toBase(e.amount,e.currency,rates,base);return e.type==="income"?acc+v:acc-v;},0);
             const d=parseISO(date);
             return (
               <div key={date} className="bg-white rounded-2xl shadow-sm overflow-hidden">
@@ -939,11 +946,11 @@ function CalendarView({store, rates, base, viewMonth, entries, onEdit}) {
     const map={};
     entries.forEach(e=>{
       if(!map[e.date]) map[e.date]={inc:0,exp:0};
-      const v=toBase(e.amount,e.currency,rates);
+      const v=toBase(e.amount,e.currency,rates,base);
       if(e.type==="income") map[e.date].inc+=v; else map[e.date].exp+=v;
     });
     return map;
-  },[entries,rates]);
+  },[entries,rates,base]);
 
   const dayEntries = useMemo(()=>{
     if(!selectedDay) return [];
@@ -1043,7 +1050,7 @@ function ChartView({store, rates, base, entries, allEntries, viewMonth, onEdit})
       return {rangeLabel:`${ymY} 年 ${ymM} 月`, rangeEntries:(allEntries||entries).filter(e=>e.date>=d1&&e.date<=d2)};
     }
     if(period==="week"){
-      const ws=new Date(now); ws.setDate(now.getDate()-((now.getDay()+6)%7));
+      const ws=new Date(now); ws.setDate(now.getDate()-now.getDay());
       const we=new Date(ws); we.setDate(ws.getDate()+6);
       const d1=toISO(ws), d2=toISO(we);
       return {rangeLabel:`${d1.slice(5).replace("-","/")} ～ ${d2.slice(5).replace("-","/")}`, rangeEntries:(allEntries||entries).filter(e=>e.date>=d1&&e.date<=d2)};
@@ -1062,19 +1069,19 @@ function ChartView({store, rates, base, entries, allEntries, viewMonth, onEdit})
     const map={};
     rangeEntries.filter(e=>e.type==="expense").forEach(e=>{
       const cat=expCatMap[e.category]; const topId=cat?.parentId||e.category;
-      map[topId]=(map[topId]||0)+toBase(e.amount,e.currency,rates);
+      map[topId]=(map[topId]||0)+toBase(e.amount,e.currency,rates,base);
     });
     return map;
-  },[rangeEntries,rates]);
+  },[rangeEntries,rates,base]);
 
   const incByCat = useMemo(()=>{
     const map={};
     rangeEntries.filter(e=>e.type==="income").forEach(e=>{
       const cat=incCatMap[e.category]; const topId=cat?.parentId||e.category;
-      map[topId]=(map[topId]||0)+toBase(e.amount,e.currency,rates);
+      map[topId]=(map[topId]||0)+toBase(e.amount,e.currency,rates,base);
     });
     return map;
-  },[rangeEntries,rates]);
+  },[rangeEntries,rates,base]);
 
   const totalExp=Object.values(expByCat).reduce((a,b)=>a+b,0);
   const totalInc=Object.values(incByCat).reduce((a,b)=>a+b,0);
@@ -1089,14 +1096,14 @@ function ChartView({store, rates, base, entries, allEntries, viewMonth, onEdit})
       const cat=expCatMap[e.category];
       if((cat?.parentId||e.category)===selectedCatId){
         const cid=cat?.parentId?e.category:selectedCatId;
-        childMap[cid]=(childMap[cid]||0)+toBase(e.amount,e.currency,rates);
+        childMap[cid]=(childMap[cid]||0)+toBase(e.amount,e.currency,rates,base);
       }
     });
     return store.categories.expense
       .filter(c=>c.parentId===selectedCatId&&(childMap[c.id]||0)>0)
       .map(c=>({id:c.id,value:childMap[c.id],cat:c}))
       .sort((a,b)=>b.value-a.value);
-  },[selectedCatId,rangeEntries,expCatMap,rates,store.categories.expense]);
+  },[selectedCatId,rangeEntries,expCatMap,rates,base,store.categories.expense]);
 
   const panelVisible = useMemo(()=>
     !!(selectedChildId||(childExpData.length===0&&selectedCatId))&&!panelClosing,
@@ -1443,12 +1450,19 @@ function BasicSettings({store, setStore}) {
   const rates = store.settings.rates;
   const [fetchingRates, setFetchingRates] = useState(false);
   const [rateMsg, setRateMsg] = useState("");
-  const setBase = (c) => setStore(s=>{
-    const old = s.settings.rates; const pivot = old[c]||1;
-    const newRates = Object.fromEntries(Object.entries(old).map(([k,v])=>[k, k===c?1:Math.round(v/pivot*10000)/10000]));
-    return {...s, settings:{...s.settings, baseCurrency:c, rates:newRates}};
-  });
-  const setRate = (c, v) => setStore(s=>({...s, settings:{...s.settings, rates:{...s.settings.rates, [c]:parseFloat(v)||0}}}));
+  const setBase = (c) => setStore(s=>({...s, settings:{...s.settings, baseCurrency:c}}));
+  const setRate = (c, newV) => {
+    const v = parseFloat(newV);
+    if(!v || v<=0) return;
+    setStore(s=>{
+      const old = s.settings.rates[c]||1;
+      const factor = v/old;
+      const newRates = Object.fromEntries(
+        Object.entries(s.settings.rates).map(([k,r])=>[k, k===c ? v : Math.round(r*factor*10000)/10000])
+      );
+      return {...s, settings:{...s.settings, rates:newRates}};
+    });
+  };
 
   const fetchRates = async () => {
     setFetchingRates(true);
@@ -1487,7 +1501,7 @@ function BasicSettings({store, setStore}) {
       </div>
       <div className="bg-white rounded-2xl shadow-sm p-4">
         <div className="flex items-center justify-between mb-3">
-          <div className="text-sm font-semibold">匯率設定（兌換至 {base}）</div>
+          <div className="text-sm font-semibold">匯率設定（互相轉換）</div>
           <button onClick={fetchRates} disabled={fetchingRates}
             className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-xl font-medium transition-all ${fetchingRates?"bg-gray-100 text-gray-400":"bg-[color:var(--brand-soft)] text-[color:var(--brand)] active:opacity-70"}`}>
             <span className={fetchingRates?"animate-spin":""}>{fetchingRates?"⟳":"🔄"}</span>
@@ -1498,16 +1512,15 @@ function BasicSettings({store, setStore}) {
         <div className="space-y-2">
           {CURRENCIES.map(c=>(
             <div key={c.code} className="flex items-center gap-3">
-              <span className="text-sm w-10">{c.code}</span>
-              <input type="number" value={rates[c.code]} step="0.001"
+              <span className={`text-sm w-10 ${c.code===base?"font-bold":"font-normal"}`} style={{color:c.code===base?"var(--brand)":"inherit"}}>{c.code}</span>
+              <input type="number" value={rates[c.code]} step="0.001" min="0.0001"
                 onChange={e=>setRate(c.code,e.target.value)}
-                className="flex-1 border border-gray-200 rounded-xl px-3 py-2 text-sm text-right"
-                disabled={c.code===base}/>
-              <span className="text-xs text-gray-400 w-6">{base}</span>
+                className="flex-1 border border-gray-200 rounded-xl px-3 py-2 text-sm text-right"/>
+              <span className="text-xs text-gray-400 w-12 text-right">{c.code===base?"（主）":""}</span>
             </div>
           ))}
         </div>
-        <div className="text-[10px] text-gray-400 mt-2">匯率數據來源：Open Exchange Rates (免費版)</div>
+        <div className="text-[10px] text-gray-400 mt-2">修改任一數值後，其他幣種按比例自動調整。匯率數據來源：Open Exchange Rates</div>
       </div>
     </div>
   );
@@ -1956,7 +1969,7 @@ function EntryModal({entry, store, base, rates, onSave, onDelete, onClose, close
   const selectedCat = cats.find(c=>c.id===category);
   const parentOfSelected = selectedCat?.parentId ? cats.find(c=>c.id===selectedCat.parentId) : null;
 
-  const convertedBase = amount ? toBase(parseFloat(amount)||0, currency, rates) : 0;
+  const convertedBase = amount ? toBase(parseFloat(amount)||0, currency, rates, base) : 0;
 
   const save = () => {
     const v = parseFloat(amount);
