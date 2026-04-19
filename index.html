@@ -630,19 +630,9 @@ function App() {
     if(tabRef.current!=="home"){ changeTab("home"); }
   }, [changeTab]);
 
-  useEffect(() => {
-    // Double-pushState: iOS snapshots the rendered app when pushState({akr:1}) fires,
-    // so swiping back from state-2 → state-1 shows the app snapshot (not white).
-    history.pushState({akr:1},"");
-    history.pushState({akr:2},"");
-    const onPop = () => {
-      // Re-push immediately so there's always a state to swipe back into.
-      history.pushState({akr:2},"");
-      handleBack();
-    };
-    window.addEventListener("popstate", onPop);
-    return () => window.removeEventListener("popstate", onPop);
-  }, [handleBack]);
+  // No history.pushState: iOS swipe-back has no previous entry to animate to,
+  // so the gesture does nothing (standalone) or exits to prior browser page.
+  // In-app back is handled entirely by useSwipeNav.
 
   const base = store.settings.baseCurrency;
   const rates = store.settings.rates;

@@ -88,7 +88,7 @@ No OAuth — PAT stored in localStorage.
 --brand: #FF6B8A; --brand-soft: #FFF0F3; --income: #2ECC71; --expense: #E74C3C;
 ```
 
-## SW Cache (`sw.js`) — current: `akr-ledger-v19`
+## SW Cache (`sw.js`) — current: `akr-ledger-v20`
 
 HTML: network-first · static: cache-first · CDN: stale-while-revalidate
 
