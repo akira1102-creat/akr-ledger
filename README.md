@@ -1,52 +1,77 @@
 # AKR 記帳本
 
-> 仿 Zaim 風格的繁體中文個人記帳 PWA，支援多幣值、分類預算、跨裝置雲端同步。
+> 仿 Zaim 風格的繁體中文個人記帳 PWA，支援多幣值、自訂分類、預算管理、圖表分析及跨裝置雲端同步。
+
+🔗 **立即使用**：https://akira1102-creat.github.io/akr-ledger/
 
 ---
 
-## 功能特色
+## 功能總覽
 
-- 💰 **多幣值記帳**：MOP、HKD、CNY、USD 等，自動換算基準幣
-- 🗂️ **兩層分類**：自訂大類與子分類，可新增、刪除、拖拉排序
-- 📊 **圖表分析**：週／月／年切換，圓餅圖 + 分類預算進度
-- 📅 **月曆視圖**：按日期查看每日消費
-- 📱 **PWA 離線使用**：安裝到手機主畫面，完全離線可用
-- ☁️ **GitHub Gist 同步**：免費跨裝置同步，無需帳號註冊
-- 🔒 **數據隱私**：所有資料儲存於本機，雲端備份加密在你自己的 GitHub Gist
+### 💰 記帳
+- 收入／支出記錄，支援備註與日期
+- 自訂計算盤輸入金額（不彈出系統鍵盤），支援加減乘除
+- 刪除記錄有確認彈窗防止誤觸
+
+### 🗂️ 分類管理
+- 兩層分類：大類（圖示＋顏色）+ 子分類
+- 新增、刪除、長按拖拉排序
+- 圖表與預算以大類為單位計算
+
+### 📊 圖表分析
+- 週／月／年切換，長條圖顯示收支走勢
+- 圓餅圖（Donut）：按支出大類分佈
+- 點擊大類可鑽入子分類明細（sub-donut）
+- 各大類預算進度條
+
+### 📅 月曆視圖
+- 月曆點擊任意日期查看當日記錄
+- 開啟月曆頁時自動顯示今天的記錄
+
+### 🏠 主頁摘要
+- 本週支出概況（週起始：星期日）
+- 當月收入／支出／結餘總覽
+- 最近記帳列表
+
+### 💱 多幣值
+- 支援 MOP、HKD、CNY、USD、JPY、EUR、TWD、GBP、KRW、SGD
+- 切換基準幣值不影響匯率數值
+- 手動編輯任一幣種匯率，其餘自動按比例調整
+- 一鍵同步最新匯率（Open Exchange Rates）
+- 匯率輸入欄使用計算盤，不彈出系統鍵盤
+
+### ☁️ 雲端同步（GitHub Gist）
+- 免費跨裝置同步，無需帳號註冊
+- 1.5 秒防抖自動上傳，啟動時自動比對雲端最新版本
+- 支援手動立即同步
+
+### 📱 PWA
+- 安裝到手機主畫面，完全離線可用
+- Android：硬件返回鍵支援（sub-donut → main donut → 關閉記帳 → 主頁）
+- iOS：左滑手勢返回上一層
 
 ---
 
 ## 安裝到手機
 
-無需下載，直接從瀏覽器安裝：
-
 **Android（Chrome）**
 1. 用 Chrome 開啟網址
-2. 右上角三點選單 → 「安裝應用程式」或「加至主畫面」
+2. 右上角選單 → 「加至主畫面」或「安裝應用程式」
 
 **iOS（Safari）**
 1. 用 **Safari** 開啟網址（iOS 限定 Safari 才支援 PWA）
 2. 底部分享按鈕 → 「加入主畫面」
 
-🔗 **網址**：https://akira1102-creat.github.io/akr-ledger/
-
 ---
 
 ## 雲端同步設定（選用）
 
-同步功能使用 **GitHub Gist**，只需一個免費 GitHub 帳號，無需任何伺服器。
-
-### 步驟
-
 1. 登入 [GitHub](https://github.com)，前往 [Settings → Developer settings → Personal access tokens → Tokens (classic)](https://github.com/settings/tokens)
-2. 點「Generate new token (classic)」
-3. 勾選 **`gist`** 權限，生成 Token 並複製
-4. 開啟 App → 設定 → 數據 → 雲端同步 → 貼上 Token → 連接
-5. 完成，之後每次修改會自動同步
+2. 點「Generate new token (classic)」，勾選 **`gist`** 權限，生成並複製 Token
+3. 開啟 App → 設定 → 數據 → 雲端同步 → 貼上 Token → 連接
+4. 完成，之後每次修改會自動同步
 
-### 換機恢復
-
-在新裝置輸入**同一個 Token**，App 會自動找到備份並導入。
+**換機恢復**：在新裝置輸入同一個 Token，App 會自動找到備份並導入。
 
 ---
 
@@ -59,7 +84,7 @@ python -m http.server 8080
 # 開啟 http://localhost:8080
 ```
 
-無需 Node.js、無需 npm、無需 build。
+無需 Node.js、npm 或任何 build 工具。
 
 ---
 
@@ -69,9 +94,10 @@ python -m http.server 8080
 |---|---|
 | React 18 UMD + Babel Standalone | UI 框架（瀏覽器直接執行 JSX） |
 | Tailwind CSS Play CDN | 樣式 |
-| GitHub Gist API | 雲端備份同步 |
-| Service Worker | 離線快取 |
+| Service Worker | 離線快取（網路優先 / 快取優先 / SWR 策略） |
 | localStorage | 本機數據儲存 |
+| GitHub Gist API | 雲端備份同步 |
+| Open Exchange Rates | 匯率數據 |
 
 ---
 
@@ -79,11 +105,4 @@ python -m http.server 8080
 
 - 所有記帳數據儲存於**你的裝置本機**（localStorage）
 - 雲端同步備份至**你自己的** GitHub Gist（私密），只有你能存取
-- 不經過任何第三方伺服器
-- Token 只存在本機，不會上傳至代碼或任何地方
-
----
-
-## 版本
-
-目前版本：**v1.0.260418**
+- 不經過任何第三方伺服器，Token 只存在本機
