@@ -18,7 +18,8 @@
     --expense: #E74C3C;
   }
   * { -webkit-tap-highlight-color: transparent; box-sizing: border-box; }
-  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #F8F9FA; }
+  html { overscroll-behavior-x: none; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #F8F9FA; overscroll-behavior-x: none; }
   .amount-font { font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
   .safe-bottom { padding-bottom: calc(80px + env(safe-area-inset-bottom)); }
   .no-scrollbar::-webkit-scrollbar { display: none; }
@@ -630,22 +631,17 @@ function App() {
   }, [changeTab]);
 
   useEffect(() => {
+    // Double-pushState: iOS snapshots the rendered app when pushState({akr:1}) fires,
+    // so swiping back from state-2 → state-1 shows the app snapshot (not white).
     history.pushState({akr:1},"");
-    const onPop = () => { handleBack(); history.pushState({akr:1},""); };
+    history.pushState({akr:2},"");
+    const onPop = () => {
+      // Re-push immediately so there's always a state to swipe back into.
+      history.pushState({akr:2},"");
+      handleBack();
+    };
     window.addEventListener("popstate", onPop);
-    // Block iOS Safari native swipe-back gesture on left edge.
-    // preventDefault() stops the browser's back animation (white screen);
-    // our useSwipeNav onTouchStart/onTouchEnd still fires and handles back.
-    const blockEdge = (e) => {
-      if (e.touches && e.touches[0] && e.touches[0].clientX < 20) {
-        e.preventDefault();
-      }
-    };
-    document.addEventListener("touchstart", blockEdge, { passive: false, capture: true });
-    return () => {
-      window.removeEventListener("popstate", onPop);
-      document.removeEventListener("touchstart", blockEdge, { capture: true });
-    };
+    return () => window.removeEventListener("popstate", onPop);
   }, [handleBack]);
 
   const base = store.settings.baseCurrency;
