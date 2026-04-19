@@ -693,11 +693,7 @@ function App() {
         </div>
       </header>
 
-      <main className="safe-bottom" style={{overflow:"hidden"}} {...useSwipeNav({
-        onSwipeLeft:()=>{ if(entryOpen||tab==="set") return; const i=TAB_ORDER.indexOf(tab); if(i<TAB_ORDER.length-1) changeTab(TAB_ORDER[i+1]); },
-        onSwipeRight:()=>{ if(entryOpen||tab==="set") return; const i=TAB_ORDER.indexOf(tab); if(i>0) changeTab(TAB_ORDER[i-1]); },
-        onBack: handleBack,
-      })}>
+      <main className="safe-bottom" style={{overflow:"hidden"}} {...useSwipeNav({onBack: handleBack})}>
         <div key={tab} className={tabDir>0?"tab-slide-right":tabDir<0?"tab-slide-left":""}>
           {tab==="home"  && <HomeView store={store} rates={rates} base={base} entries={monthEntries} onEdit={openEdit} onDelete={removeEntry} monthTotals={monthTotals} viewMonth={viewMonth} />}
           {tab==="cal"   && <CalendarView store={store} rates={rates} base={base} viewMonth={viewMonth} entries={monthEntries} onEdit={openEdit} />}
@@ -1025,6 +1021,7 @@ function ChartView({store, rates, base, entries, allEntries, viewMonth, onEdit})
   const [selectedCatId, setSelectedCatId] = useState(null);
   const [selectedChildId, setSelectedChildId] = useState(null);
   const [panelClosing, setPanelClosing] = useState(false);
+  const [drillDir, setDrillDir] = useState(0);
   const selectedChildIdRef = useRef(selectedChildId);
   useEffect(()=>{ selectedChildIdRef.current=selectedChildId; },[selectedChildId]);
 
@@ -1112,6 +1109,14 @@ function ChartView({store, rates, base, entries, allEntries, viewMonth, onEdit})
     return ()=>popBack(closePanel);
   },[panelVisible,closePanel]);
 
+  useEffect(()=>{
+    const inSubNow=!!(selectedCatId&&childExpData.length>0)&&!panelVisible;
+    if(!inSubNow) return;
+    const fn=()=>{setDrillDir(-1);setSelectedCatId(null);setSelectedChildId(null);};
+    pushBack(fn);
+    return ()=>popBack(fn);
+  },[!!selectedCatId,childExpData.length,panelVisible]);
+
   const filteredEntries=useMemo(()=>{
     const filterCatId=selectedChildId||(childExpData.length===0?selectedCatId:null);
     if(!filterCatId) return [];
@@ -1149,18 +1154,21 @@ function ChartView({store, rates, base, entries, allEntries, viewMonth, onEdit})
         {totalExp===0?(
           <div className="py-10 text-center text-gray-400 text-sm">本期暫無支出</div>
         ):(()=>{
-          const inSub=selectedCatId&&childExpData.length>0;
+          const inSub=!!(selectedCatId&&childExpData.length>0);
           const activeData=inSub?childExpData:pieData;
           const activeTotal=inSub?childExpData.reduce((s,d)=>s+d.value,0):totalExp;
           const activeSelected=inSub?selectedChildId:selectedCatId;
           const handleSelect=inSub
             ?id=>{setSelectedChildId(id===selectedChildId?null:id);}
-            :id=>{setSelectedCatId(id===selectedCatId?null:id);setSelectedChildId(null);};
+            :id=>{
+              if(id===selectedCatId){setSelectedCatId(null);setSelectedChildId(null);setDrillDir(0);}
+              else{setDrillDir(1);setSelectedCatId(id);setSelectedChildId(null);}
+            };
           return (
-            <div className="flex flex-col items-center">
+            <div key={inSub?"sub":"parent"} className={`flex flex-col items-center ${drillDir>0?"tab-slide-right":drillDir<0?"tab-slide-left":""}`}>
               {inSub&&(
                 <div className="w-full flex items-center gap-2 mb-3">
-                  <button onClick={()=>{setSelectedCatId(null);setSelectedChildId(null);}}
+                  <button onClick={()=>{setDrillDir(-1);setSelectedCatId(null);setSelectedChildId(null);}}
                     className="text-xs text-gray-400 px-2.5 py-1 bg-gray-100 rounded-lg active:bg-gray-200">← 返回</button>
                   <span className="text-xs font-medium text-gray-600">{allCatMap[selectedCatId]?.icon} {allCatMap[selectedCatId]?.name} 細項</span>
                 </div>
@@ -1411,12 +1419,8 @@ function SettingsView({store, setStore, drive}) {
     setTabDir(tabs.findIndex(t=>t[0]===k)>tabs.findIndex(t=>t[0]===tab)?1:-1);
     setTab(k);
   };
-  const settingsSwipe = useSwipeNav({
-    onSwipeLeft:()=>{ const i=tabs.findIndex(t=>t[0]===tab); if(i<tabs.length-1) changeSettingsTab(tabs[i+1][0]); },
-    onSwipeRight:()=>{ const i=tabs.findIndex(t=>t[0]===tab); if(i>0) changeSettingsTab(tabs[i-1][0]); },
-  });
   return (
-    <div className="px-3 pt-3 space-y-3" {...settingsSwipe}>
+    <div className="px-3 pt-3 space-y-3">
       <div className="bg-white rounded-2xl shadow-sm p-1 flex gap-1">
         {tabs.map(([k,l])=>(
           <button key={k} onClick={()=>changeSettingsTab(k)}
@@ -1439,7 +1443,11 @@ function BasicSettings({store, setStore}) {
   const rates = store.settings.rates;
   const [fetchingRates, setFetchingRates] = useState(false);
   const [rateMsg, setRateMsg] = useState("");
-  const setBase = (c) => setStore(s=>({...s, settings:{...s.settings, baseCurrency:c}}));
+  const setBase = (c) => setStore(s=>{
+    const old = s.settings.rates; const pivot = old[c]||1;
+    const newRates = Object.fromEntries(Object.entries(old).map(([k,v])=>[k, k===c?1:Math.round(v/pivot*10000)/10000]));
+    return {...s, settings:{...s.settings, baseCurrency:c, rates:newRates}};
+  });
   const setRate = (c, v) => setStore(s=>({...s, settings:{...s.settings, rates:{...s.settings.rates, [c]:parseFloat(v)||0}}}));
 
   const fetchRates = async () => {
@@ -1598,7 +1606,7 @@ function CatSettings({store, setStore}) {
                 <input type="text" value={parent.name} onChange={e=>updateCat(parent.id,"name",e.target.value.slice(0,10))}
                   className="flex-1 font-semibold text-sm bg-transparent border-0 outline-none"/>
                 <span className="text-[10px] text-gray-400 flex-shrink-0 mr-1">{children.length>0?`${children.length}項`:""}</span>
-                <button onClick={()=>deleteParent(parent.id)}
+                <button onClick={()=>{ if(window.confirm(`確定刪除「${parent.name}」分類？此操作無法還原。`)) deleteParent(parent.id); }}
                   className="text-gray-300 hover:text-red-400 text-base flex-shrink-0 px-1 active:scale-90 transition-transform">🗑️</button>
               </div>
               {/* 第二層分類 */}
@@ -1621,7 +1629,7 @@ function CatSettings({store, setStore}) {
                       </div>
                       <input type="text" value={c.name} onChange={e=>updateCat(c.id,"name",e.target.value.slice(0,10))}
                         className="flex-1 text-sm bg-gray-50 rounded-lg px-2.5 py-1.5"/>
-                      <button onClick={()=>deleteChild(c.id)}
+                      <button onClick={()=>{ if(window.confirm(`確定刪除「${c.name}」子分類？`)) deleteChild(c.id); }}
                         className="text-gray-300 hover:text-red-400 text-sm flex-shrink-0 px-1 active:scale-90 transition-transform">🗑️</button>
                     </div>
                   )}
@@ -1914,6 +1922,7 @@ function DataSettings({store, setStore, drive}) {
 /* ===================== 記帳 Modal ===================== */
 function EntryModal({entry, store, base, rates, onSave, onDelete, onClose, closeSignal}) {
   const [exiting, setExiting] = React.useState(false);
+  const [confirmDel, setConfirmDel] = React.useState(false);
   const handleClose = React.useCallback(()=>{ setExiting(true); setTimeout(onClose,230); },[onClose]);
   useEffect(()=>{ if(closeSignal>0) handleClose(); },[closeSignal]);
   const isEdit = !!entry;
@@ -2054,9 +2063,16 @@ function EntryModal({entry, store, base, rates, onSave, onDelete, onClose, close
 
         {/* 刪除 */}
         {isEdit&&(
-          <button onClick={()=>onDelete(entry.id)} className="w-full py-3 rounded-xl text-sm font-medium text-red-500 bg-red-50">
-            刪除此記錄
-          </button>
+          confirmDel?(
+            <div className="flex gap-2">
+              <button onClick={()=>setConfirmDel(false)} className="flex-1 py-3 rounded-xl text-sm font-medium text-gray-500 bg-gray-100">取消</button>
+              <button onClick={()=>onDelete(entry.id)} className="flex-1 py-3 rounded-xl text-sm font-medium text-white bg-red-500">確定刪除</button>
+            </div>
+          ):(
+            <button onClick={()=>setConfirmDel(true)} className="w-full py-3 rounded-xl text-sm font-medium text-red-500 bg-red-50">
+              刪除此記錄
+            </button>
+          )
         )}
         <div className="h-4"/>
       </div>

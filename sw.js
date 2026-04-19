@@ -1,6 +1,6 @@
 // AKR記帳本 Service Worker
 // ⚠️ 每次部署新版本，請遞增 CACHE 版本號，舊快取會在 activate 時自動清除
-const CACHE = "akr-ledger-v11";
+const CACHE = "akr-ledger-v12";
 
 const STATIC_ASSETS = [
   "./manifest.json",
