@@ -387,6 +387,7 @@ const defaultStore = () => ({
 const normalizeStore = (s) => {
   if (!s.totalBudget) s.totalBudget = 0;
   if (!s.budgets) s.budgets = {};
+  if (s.budgetInBalance == null) s.budgetInBalance = false;
   if (!s.categories?.expense) s.categories = defaultStore().categories;
   return s;
 };
@@ -656,9 +657,9 @@ function App() {
       if (e.type==="income") inc+=v; else exp+=v;
     });
     const tb = store.totalBudget || 0;
-    const net = tb > 0 ? tb - exp + inc : inc - exp;
+    const net = (store.budgetInBalance && tb > 0) ? tb + inc - exp : inc - exp;
     return { inc, exp, net };
-  }, [monthEntries, rates, base, store.totalBudget]);
+  }, [monthEntries, rates, base, store.totalBudget, store.budgetInBalance]);
 
   const upsertEntry = (entry) => {
     setStore(s => {
@@ -1729,8 +1730,10 @@ function BudgetSettings({store, setStore}) {
   const budgets = store.budgets || {};
   const totalBudget = store.totalBudget || 0;
 
+  const budgetInBalance = store.budgetInBalance || false;
   const setBudget = (id, val) => setStore(s=>({...s, budgets:{...s.budgets, [id]:parseFloat(val)||0}, _lastModified: new Date().toISOString()}));
   const setTotalBudget = (val) => setStore(s=>({...s, totalBudget:parseFloat(val)||0, _lastModified: new Date().toISOString()}));
+  const toggleBudgetInBalance = () => setStore(s=>({...s, budgetInBalance:!s.budgetInBalance, _lastModified: new Date().toISOString()}));
 
   const catBudgetSum = parentExpCats.reduce((sum,c)=>(budgets[c.id]||0)>0?sum+(budgets[c.id]||0):sum,0);
   const overAlloc = totalBudget>0 && catBudgetSum>totalBudget;
@@ -1752,6 +1755,16 @@ function BudgetSettings({store, setStore}) {
           </div>
         )}
         {totalBudget>0&&<div className="mt-2 text-xs text-gray-400">分類預算啟用後，合計不能超過總預算</div>}
+        <div className="flex items-center justify-between mt-3 pt-3 border-t border-gray-100">
+          <div>
+            <div className="text-sm text-gray-700">將預算納入結餘計算</div>
+            <div className="text-xs text-gray-400 mt-0.5">{budgetInBalance ? "結餘 = 預算 + 收入 − 支出" : "結餘 = 收入 − 支出"}</div>
+          </div>
+          <button onClick={toggleBudgetInBalance} disabled={!totalBudget}
+            className={`relative w-11 h-6 rounded-full transition-colors ${budgetInBalance&&totalBudget?"bg-[color:var(--brand)]":"bg-gray-200"} ${!totalBudget?"opacity-40 cursor-not-allowed":""}`}>
+            <span className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${budgetInBalance&&totalBudget?"left-5":"left-0.5"}`}/>
+          </button>
+        </div>
       </div>
 
       {/* 分類預算 */}
