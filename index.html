@@ -631,6 +631,9 @@ function App() {
   }, [changeTab]);
 
   useEffect(() => {
+    const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) ||
+      (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+    if (isIOS) return; // iOS: no pushState → no white-screen swipe-back issue
     history.pushState({akr:1},"");
     history.pushState({akr:2},"");
     const onPop = () => { history.pushState({akr:2},""); handleBack(); };
