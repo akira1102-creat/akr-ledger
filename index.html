@@ -1418,7 +1418,7 @@ function AboutView() {
           <div className="w-full space-y-3">
             <div className="flex justify-between items-center py-3 border-b border-gray-100">
               <span className="text-sm text-gray-500">版本</span>
-              <span className="text-sm font-semibold text-gray-800">v1.0.260418</span>
+              <span className="text-sm font-semibold text-gray-800">v1.0.260421</span>
             </div>
             <div className="flex justify-between items-center py-3 border-b border-gray-100">
               <span className="text-sm text-gray-500">製作者</span>
@@ -2047,7 +2047,7 @@ function EntryModal({entry, store, base, rates, onSave, onDelete, onClose, close
   const [currency, setCurrency] = useState(entry?.currency || base);
   const [date, setDate] = useState(entry?.date || today);
   const [memo, setMemo] = useState(entry?.memo || "");
-  const [calcOpen, setCalcOpen] = useState(false);
+  const [calcOpen, setCalcOpen] = useState(!entry); // auto-open for new entries
   const [calcExpr, setCalcExpr] = useState(entry?.amount ? String(entry.amount) : "");
   // 初始展開：編輯模式時還原子分類所屬的父分類
   const [catTab, setCatTab] = useState(()=>{
@@ -2160,48 +2160,58 @@ function EntryModal({entry, store, base, rates, onSave, onDelete, onClose, close
         {/* 分類選擇 */}
         <div>
           <div className="text-sm text-gray-500 mb-2">分類</div>
-          {/* 第一層：大類 */}
-          <div className="grid grid-cols-4 gap-2">
-            {parentCats.map(parent=>{
-              const children=cats.filter(c=>c.parentId===parent.id);
-              const directSel=category===parent.id;
-              const childSel=selectedCat?.parentId===parent.id;
-              const expanded=catTab===parent.id;
-              const bg=directSel?parent.color+"CC":childSel?parent.color+"44":expanded?parent.color+"22":"#F8F9FA";
-              const txt=directSel?"text-white":"";
-              return (
-                <button key={parent.id}
-                  onClick={()=>{ if(children.length===0){setCategory(parent.id);setCatTab(null);} else setCatTab(expanded?null:parent.id); }}
-                  className={`flex flex-col items-center py-2.5 rounded-2xl text-xs transition-all ${txt} ${expanded?"ring-2 ring-offset-1":""}`}
-                  style={{background:bg, ...(expanded?{ringColor:parent.color}:{})}}>
-                  <span className="text-xl mb-0.5">{parent.icon}</span>
-                  <span className="truncate w-full text-center px-1">{parent.name}</span>
-                  {children.length>0&&<span className={`text-[8px] mt-0.5 ${directSel?"text-white/70":"text-gray-400"}`}>{expanded?"▲":"▼"}</span>}
-                </button>
-              );
-            })}
+          <div className="flex rounded-2xl border border-gray-200 overflow-hidden" style={{height:"192px"}}>
+            {/* 左：主分類清單 */}
+            <div className="w-1/2 overflow-y-auto no-scrollbar border-r border-gray-200">
+              {parentCats.map(parent=>{
+                const children=cats.filter(c=>c.parentId===parent.id);
+                const isActive=catTab===parent.id;
+                const childSel=selectedCat?.parentId===parent.id;
+                const directSel=category===parent.id&&!selectedCat?.parentId;
+                const highlight=isActive||childSel||directSel;
+                return (
+                  <button key={parent.id} onClick={e=>{
+                    e.stopPropagation();
+                    setCatTab(parent.id);
+                    if(children.length===0) setCategory(parent.id);
+                  }}
+                    className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-left transition-colors"
+                    style={{
+                      background: highlight ? parent.color+"22" : "transparent",
+                      borderLeft: `3px solid ${highlight ? parent.color : "transparent"}`,
+                      fontWeight: highlight ? 600 : 400,
+                    }}>
+                    <span className="text-base flex-shrink-0">{parent.icon}</span>
+                    <span className="truncate">{parent.name}</span>
+                  </button>
+                );
+              })}
+            </div>
+            {/* 右：次分類清單 */}
+            <div className="w-1/2 overflow-y-auto no-scrollbar">
+              {!catTab && (
+                <div className="flex items-center justify-center h-full text-xs text-gray-400">← 選擇主分類</div>
+              )}
+              {catTab&&(()=>{
+                const children=cats.filter(c=>c.parentId===catTab);
+                if(!children.length) return (
+                  <div className="flex items-center justify-center h-full text-xs text-gray-400">此分類無子分類</div>
+                );
+                return children.map(c=>(
+                  <button key={c.id} onClick={e=>{ e.stopPropagation(); setCategory(c.id); }}
+                    className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-left transition-colors"
+                    style={{
+                      background: category===c.id ? c.color+"33" : "transparent",
+                      borderLeft: `3px solid ${category===c.id ? c.color : "transparent"}`,
+                      fontWeight: category===c.id ? 600 : 400,
+                    }}>
+                    <span className="text-base flex-shrink-0">{c.icon}</span>
+                    <span className="truncate">{c.name}</span>
+                  </button>
+                ));
+              })()}
+            </div>
           </div>
-          {/* 第二層：子分類（獨立區塊，有顏色邊框） */}
-          {catTab&&(()=>{
-            const parent=cats.find(c=>c.id===catTab);
-            const children=cats.filter(c=>c.parentId===catTab);
-            if(!parent||!children.length) return null;
-            return (
-              <div className="mt-2 rounded-2xl p-3 border-l-4" style={{background:parent.color+"11", borderColor:parent.color}}>
-                <div className="text-[10px] font-semibold mb-2" style={{color:parent.color}}>{parent.icon} {parent.name} 的子分類</div>
-                <div className="grid grid-cols-4 gap-2">
-                  {children.map(c=>(
-                    <button key={c.id} onClick={()=>setCategory(c.id)}
-                      className={`flex flex-col items-center py-2 rounded-xl text-xs transition-all ${category===c.id?"text-white shadow-md":""}`}
-                      style={{background:category===c.id?c.color+"CC":"#fff"}}>
-                      <span className="text-lg mb-0.5">{c.icon}</span>
-                      <span className="truncate w-full text-center px-0.5">{c.name}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            );
-          })()}
         </div>
 
         {/* 刪除 */}
