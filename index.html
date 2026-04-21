@@ -570,10 +570,19 @@ function SortableList({ items, renderItem, onReorder, itemHeight = 68 }) {
 }
 
 /* ===================== Swipe / Back helpers ===================== */
-const _backStack = [];
-const pushBack = fn => _backStack.push(fn);
-const popBack  = fn => { const i=_backStack.lastIndexOf(fn); if(i>=0) _backStack.splice(i,1); };
-const consumeBack = () => { if(_backStack.length>0){ _backStack.pop()(); return true; } return false; };
+// Named back-navigation layers — priority order is fixed (index 0 = highest).
+// Each slot holds at most one handler. consumeBack fires the highest-priority
+// active layer, so push ordering never matters.
+const _layers = { calcPad:null, entryModal:null, chartPanel:null, chartSub:null, goHome:null };
+const _layerOrder = ['calcPad','entryModal','chartPanel','chartSub','goHome'];
+const setLayer   = (name, fn) => { _layers[name] = fn; };
+const clearLayer = (name)     => { _layers[name] = null; };
+const consumeBack = () => {
+  for (const name of _layerOrder) {
+    if (_layers[name]) { const fn=_layers[name]; _layers[name]=null; fn(); return true; }
+  }
+  return false;
+};
 
 function useSwipeNav({onSwipeLeft, onSwipeRight, onBack}={}) {
   const t0   = useRef(null);
@@ -625,13 +634,10 @@ function App() {
 
   useEffect(()=>{ tabRef.current=tab; }, [tab]);
 
-  // Push "go home" when on a non-home tab (bottom of back stack for that tab).
-  // Cleanup automatically pops it when tab changes away.
+  // Register "go home" layer when on a non-home tab.
   useEffect(()=>{
-    if(tab==="home") return;
-    const fn = ()=>changeTab("home");
-    pushBack(fn);
-    return ()=>popBack(fn);
+    if(tab==="home"){ clearLayer('goHome'); return; }
+    setLayer('goHome', ()=>changeTab("home"));
   }, [tab, changeTab]);
 
   // handleBack is a pure stack consumer — all layers manage themselves.
@@ -681,23 +687,12 @@ function App() {
   const removeEntry = (id) => setStore(s => ({...s, entries:s.entries.filter(e=>e.id!==id), _lastModified: new Date().toISOString()}));
 
   // Track the back-stack handler for the entry modal so we can pop it
-  // regardless of how the modal is closed (back / cancel / save / delete).
-  const entryBackFnRef = useRef(null);
+  const openAdd  = () => { setEditing(null); setLayer('entryModal', ()=>setEntryCloseSignal(s=>s+1)); setEntryOpen(true); };
+  const openEdit = (e) => { setEditing(e);   setLayer('entryModal', ()=>setEntryCloseSignal(s=>s+1)); setEntryOpen(true); };
 
-  const _openEntry = () => {
-    // Push closeModal onto the back stack SYNCHRONOUSLY in the event handler,
-    // guaranteed to run before any React effect (including calcOpen's pushBack).
-    const fn = () => setEntryCloseSignal(s=>s+1);
-    entryBackFnRef.current = fn;
-    pushBack(fn);
-    setEntryOpen(true);
-  };
-  const openAdd  = () => { setEditing(null);  _openEntry(); };
-  const openEdit = (e) => { setEditing(e);    _openEntry(); };
-
-  // Called whenever the modal fully closes — cleans up the back-stack entry.
   const handleEntryClose = useCallback(() => {
-    if (entryBackFnRef.current) { popBack(entryBackFnRef.current); entryBackFnRef.current = null; }
+    clearLayer('entryModal');
+    clearLayer('calcPad');   // in case calc pad was open when modal closed
     setEntryOpen(false);
     setEntryCloseSignal(0);
   }, []);
@@ -1166,17 +1161,14 @@ function ChartView({store, rates, base, entries, allEntries, viewMonth, onEdit})
   );
 
   useEffect(()=>{
-    if(!panelVisible) return;
-    pushBack(closePanel);
-    return ()=>popBack(closePanel);
+    if(panelVisible) setLayer('chartPanel', closePanel);
+    else clearLayer('chartPanel');
   },[panelVisible,closePanel]);
 
   useEffect(()=>{
     const inSubNow=!!(selectedCatId&&childExpData.length>0)&&!panelVisible;
-    if(!inSubNow) return;
-    const fn=()=>{setDrillDir(-1);setSelectedCatId(null);setSelectedChildId(null);};
-    pushBack(fn);
-    return ()=>popBack(fn);
+    if(inSubNow) setLayer('chartSub', ()=>{setDrillDir(-1);setSelectedCatId(null);setSelectedChildId(null);});
+    else clearLayer('chartSub');
   },[!!selectedCatId,childExpData.length,panelVisible]);
 
   const filteredEntries=useMemo(()=>{
@@ -1507,12 +1499,9 @@ function BasicSettings({store, setStore}) {
   const [rateMsg, setRateMsg] = useState("");
   const [rateCalc, setRateCalc] = useState(null); // {code, expr}
 
-  // Push rateCalc close onto back stack while open
   useEffect(()=>{
-    if(!rateCalc) return;
-    const fn = ()=>setRateCalc(null);
-    pushBack(fn);
-    return ()=>popBack(fn);
+    if(rateCalc) setLayer('calcPad', ()=>setRateCalc(null));
+    else clearLayer('calcPad');
   }, [!!rateCalc]);
 
   const openRateCalc = (code) => setRateCalc({code, expr: String(rates[code]||"")});
@@ -2129,14 +2118,9 @@ function EntryModal({entry, store, base, rates, onSave, onDelete, onClose, close
     return ec?.parentId||null;
   });
 
-  // closeModal is pushed by App's openAdd/openEdit event handler (synchronous),
-  // guaranteeing it is always below closeCalcPad in the back stack.
-  // This effect only handles the calc pad layer.
   useEffect(()=>{
-    if(!calcOpen) return;
-    const fn = ()=>setCalcOpen(false);
-    pushBack(fn);
-    return ()=>popBack(fn);
+    if(calcOpen) setLayer('calcPad', ()=>setCalcOpen(false));
+    else clearLayer('calcPad');
   },[calcOpen]);
   const memoRef = useRef(null);
   const scrollRef = useRef(null);
