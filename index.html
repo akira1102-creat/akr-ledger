@@ -388,6 +388,8 @@ const normalizeStore = (s) => {
   if (!s.totalBudget) s.totalBudget = 0;
   if (!s.budgets) s.budgets = {};
   if (s.budgetInBalance == null) s.budgetInBalance = false;
+  if (!s.monthlyBudgets) s.monthlyBudgets = {};
+  if (s.useMonthlyBudget == null) s.useMonthlyBudget = false;
   if (!s.categories?.expense) s.categories = defaultStore().categories;
   return s;
 };
@@ -656,10 +658,13 @@ function App() {
       const v = toBase(e.amount, e.currency, rates, base);
       if (e.type==="income") inc+=v; else exp+=v;
     });
-    const tb = store.totalBudget || 0;
+    const mNum = parseInt(viewMonth.split("-")[1]);
+    const tb = store.useMonthlyBudget
+      ? (store.monthlyBudgets?.[mNum] || 0)
+      : (store.totalBudget || 0);
     const net = (store.budgetInBalance && tb > 0) ? tb + inc - exp : inc - exp;
-    return { inc, exp, net };
-  }, [monthEntries, rates, base, store.totalBudget, store.budgetInBalance]);
+    return { inc, exp, net, tb };
+  }, [monthEntries, rates, base, store.totalBudget, store.budgetInBalance, store.useMonthlyBudget, store.monthlyBudgets, viewMonth]);
 
   const upsertEntry = (entry) => {
     setStore(s => {
@@ -769,7 +774,7 @@ function HomeView({store, rates, base, entries, onEdit, onDelete, monthTotals, v
   const todayExp = useMemo(()=>entries.filter(e=>e.type==="expense"&&e.date===todayISO).reduce((s,e)=>s+toBase(e.amount,e.currency,rates,base),0),[entries,rates,base,todayISO]);
   const weekExp  = useMemo(()=>entries.filter(e=>e.type==="expense"&&e.date>=weekStartISO).reduce((s,e)=>s+toBase(e.amount,e.currency,rates,base),0),[entries,rates,base,weekStartISO]);
   const monthExp = monthTotals.exp;
-  const tb = store.totalBudget || 0;
+  const tb = monthTotals.tb ?? 0; // effective budget (monthly or total)
 
   const [ymY, ymM] = viewMonth.split("-").map(Number);
   const daysInMonth = new Date(ymY, ymM, 0).getDate();
@@ -807,11 +812,14 @@ function HomeView({store, rates, base, entries, onEdit, onDelete, monthTotals, v
       <div className="bg-white rounded-2xl shadow-sm p-4">
         <div className="text-sm font-semibold mb-3">💳 支出概況</div>
         {[
-          {label:"本月", exp:monthExp, budget:tb,         sub:tb>0?`共 ${daysInMonth} 日`:null},
-          {label:"本週", exp:weekExp,  budget:weekBudget, sub:tb>0?`共 ${daysThisWeek} 日`:null},
-          {label:"今日", exp:todayExp, budget:dayBudget,  sub:null},
-        ].map(({label,exp,budget,sub})=>{
-          const has=budget>0, remain=has?budget-exp:0, pct=has?Math.min(100,exp/budget*100):0, over=has&&exp>budget;
+          {label:"本月", exp:monthExp, budget:tb,         sub:tb>0?`共 ${daysInMonth} 日`:null, net:monthTotals.net},
+          {label:"本週", exp:weekExp,  budget:weekBudget, sub:tb>0?`共 ${daysThisWeek} 日`:null, net:null},
+          {label:"今日", exp:todayExp, budget:dayBudget,  sub:null, net:null},
+        ].map(({label,exp,budget,sub,net})=>{
+          const has=budget>0;
+          // 本月結餘同步置頂：用 net（已含預算+收入-支出）；其他行用 budget-exp
+          const remain=has?(net!==null?net:budget-exp):0;
+          const pct=has?Math.min(100,exp/budget*100):0, over=has&&remain<0;
           return (
             <div key={label} className="mb-4 last:mb-0">
               <div className="flex items-center justify-between mb-1">
@@ -1731,17 +1739,46 @@ function BudgetSettings({store, setStore}) {
   const totalBudget = store.totalBudget || 0;
 
   const budgetInBalance = store.budgetInBalance || false;
+  const useMonthlyBudget = store.useMonthlyBudget || false;
+  const monthlyBudgets = store.monthlyBudgets || {};
   const setBudget = (id, val) => setStore(s=>({...s, budgets:{...s.budgets, [id]:parseFloat(val)||0}, _lastModified: new Date().toISOString()}));
   const setTotalBudget = (val) => setStore(s=>({...s, totalBudget:parseFloat(val)||0, _lastModified: new Date().toISOString()}));
+  const setMonthlyBudget = (m, val) => setStore(s=>({...s, monthlyBudgets:{...s.monthlyBudgets, [m]:parseFloat(val)||0}, _lastModified: new Date().toISOString()}));
   const toggleBudgetInBalance = () => setStore(s=>({...s, budgetInBalance:!s.budgetInBalance, _lastModified: new Date().toISOString()}));
+  const toggleMonthlyBudget = () => setStore(s=>({...s, useMonthlyBudget:!s.useMonthlyBudget, _lastModified: new Date().toISOString()}));
 
   const catBudgetSum = parentExpCats.reduce((sum,c)=>(budgets[c.id]||0)>0?sum+(budgets[c.id]||0):sum,0);
   const overAlloc = totalBudget>0 && catBudgetSum>totalBudget;
 
+  const MONTH_NAMES = ["1月","2月","3月","4月","5月","6月","7月","8月","9月","10月","11月","12月"];
   return (
     <div className="space-y-3">
-      {/* 總預算 */}
+      {/* 每月個別預算 */}
       <div className="bg-white rounded-2xl shadow-sm p-4">
+        <div className="flex items-center justify-between mb-3">
+          <div className="text-sm font-semibold">📅 每月個別預算</div>
+          <button onClick={toggleMonthlyBudget}
+            className={`relative w-11 h-6 rounded-full transition-colors ${useMonthlyBudget?"bg-[color:var(--brand)]":"bg-gray-200"}`}>
+            <span className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-all ${useMonthlyBudget?"left-5":"left-0.5"}`}/>
+          </button>
+        </div>
+        {useMonthlyBudget && (
+          <div className="grid grid-cols-2 gap-2">
+            {MONTH_NAMES.map((name,i)=>(
+              <div key={i+1} className="flex items-center gap-2">
+                <span className="text-xs text-gray-500 w-8 flex-shrink-0">{name}</span>
+                <input type="number" value={monthlyBudgets[i+1]||""} placeholder="0"
+                  onChange={e=>setMonthlyBudget(i+1, e.target.value)}
+                  className="flex-1 border border-gray-200 rounded-xl px-2 py-1.5 text-sm text-right min-w-0"/>
+              </div>
+            ))}
+          </div>
+        )}
+        {!useMonthlyBudget && <div className="text-xs text-gray-400">開啟後可為 1–12 月各自設定預算，啟用時下方總預算設定將停用</div>}
+      </div>
+
+      {/* 總預算 */}
+      <div className={`bg-white rounded-2xl shadow-sm p-4 ${useMonthlyBudget?"opacity-40 pointer-events-none":""}`}>
         <div className="text-sm font-semibold mb-3">📊 每月總預算 ({base})</div>
         <div className="flex items-center gap-3">
           <input type="number" value={totalBudget||""} placeholder="0 = 不設定"
@@ -2049,13 +2086,24 @@ function EntryModal({entry, store, base, rates, onSave, onDelete, onClose, close
   const [memo, setMemo] = useState(entry?.memo || "");
   const [calcOpen, setCalcOpen] = useState(!entry); // auto-open for new entries
   const [calcExpr, setCalcExpr] = useState(entry?.amount ? String(entry.amount) : "");
-  // 初始展開：編輯模式時還原子分類所屬的父分類
+  // 初始展開：新增時預設第一個主分類；編輯時還原子分類所屬的父分類
   const [catTab, setCatTab] = useState(()=>{
-    if (!entry?.category) return null;
+    if (!entry?.category) {
+      const fp = store.categories.expense.find(c=>!c.parentId);
+      return fp?.id || null;
+    }
     const allCats=[...(store.categories.expense||[]),...(store.categories.income||[])];
     const ec=allCats.find(c=>c.id===entry.category);
     return ec?.parentId||null;
   });
+
+  // Android back：計算盤開啟時先收回計算盤
+  useEffect(()=>{
+    if(!calcOpen) return;
+    const fn = ()=>setCalcOpen(false);
+    pushBack(fn);
+    return ()=>popBack(fn);
+  },[calcOpen]);
   const memoRef = useRef(null);
   const scrollRef = useRef(null);
 
@@ -2118,7 +2166,7 @@ function EntryModal({entry, store, base, rates, onSave, onDelete, onClose, close
         {/* 收支切換 */}
         <div className="flex gap-2">
           {[["expense","支出","var(--expense)"],["income","收入","var(--income)"]].map(([t,l,c])=>(
-            <button key={t} onClick={()=>{setType(t);setCategory("");}}
+            <button key={t} onClick={()=>{ setType(t); setCategory(""); const fp=store.categories[t].find(x=>!x.parentId); setCatTab(fp?.id||null); }}
               className={`flex-1 py-2.5 rounded-xl text-sm font-semibold transition-all ${type===t?"text-white shadow-md":"bg-gray-100 text-gray-500"}`}
               style={{background:type===t?c:undefined}}>{l}</button>
           ))}
