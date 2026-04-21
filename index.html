@@ -575,12 +575,13 @@ function SortableList({ items, renderItem, onReorder, itemHeight = 68 }) {
 // active layer, so push ordering never matters.
 const _layers = { calcPad:null, entryModal:null, chartPanel:null, chartSub:null, goHome:null };
 const _layerOrder = ['calcPad','entryModal','chartPanel','chartSub','goHome'];
-const setLayer   = (name, fn) => { _layers[name] = fn; };
-const clearLayer = (name)     => { _layers[name] = null; };
+const setLayer   = (name, fn) => { _layers[name] = fn; console.log('[back] set', name, JSON.stringify(Object.fromEntries(_layerOrder.map(k=>[k,!!_layers[k]])))); };
+const clearLayer = (name)     => { _layers[name] = null; console.log('[back] clear', name, JSON.stringify(Object.fromEntries(_layerOrder.map(k=>[k,!!_layers[k]])))); };
 const consumeBack = () => {
   for (const name of _layerOrder) {
-    if (_layers[name]) { const fn=_layers[name]; _layers[name]=null; fn(); return true; }
+    if (_layers[name]) { const fn=_layers[name]; _layers[name]=null; console.log('[back] fire', name); fn(); return true; }
   }
+  console.log('[back] consumeBack — no active layer');
   return false;
 };
 
