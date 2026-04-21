@@ -2160,9 +2160,9 @@ function EntryModal({entry, store, base, rates, onSave, onDelete, onClose, close
         {/* 分類選擇 */}
         <div>
           <div className="text-sm text-gray-500 mb-2">分類</div>
-          <div className="flex rounded-2xl border border-gray-200 overflow-hidden" style={{height:"192px"}}>
+          <div className="flex rounded-2xl border border-gray-200 overflow-hidden">
             {/* 左：主分類清單 */}
-            <div className="w-1/2 overflow-y-auto no-scrollbar border-r border-gray-200">
+            <div className="w-1/2 border-r border-gray-200">
               {parentCats.map(parent=>{
                 const children=cats.filter(c=>c.parentId===parent.id);
                 const isActive=catTab===parent.id;
@@ -2188,14 +2188,14 @@ function EntryModal({entry, store, base, rates, onSave, onDelete, onClose, close
               })}
             </div>
             {/* 右：次分類清單 */}
-            <div className="w-1/2 overflow-y-auto no-scrollbar">
+            <div className="w-1/2">
               {!catTab && (
-                <div className="flex items-center justify-center h-full text-xs text-gray-400">← 選擇主分類</div>
+                <div className="flex items-center justify-center py-6 text-xs text-gray-400">← 選擇主分類</div>
               )}
               {catTab&&(()=>{
                 const children=cats.filter(c=>c.parentId===catTab);
                 if(!children.length) return (
-                  <div className="flex items-center justify-center h-full text-xs text-gray-400">此分類無子分類</div>
+                  <div className="flex items-center justify-center py-6 text-xs text-gray-400">此分類無子分類</div>
                 );
                 return children.map(c=>(
                   <button key={c.id} onClick={e=>{ e.stopPropagation(); setCategory(c.id); }}
