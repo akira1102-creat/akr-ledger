@@ -10,6 +10,7 @@
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 <script src="https://cdn.tailwindcss.com"></script>
+<script>tailwind.config = { darkMode: 'class' }</script>
 <style>
   :root {
     --brand: #FF6B8A;
@@ -20,6 +21,29 @@
   * { -webkit-tap-highlight-color: transparent; box-sizing: border-box; }
   html { overscroll-behavior-x: none; }
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #F8F9FA; overscroll-behavior-x: none; }
+
+  /* ── Dark Mode ── */
+  html.dark body { background: #111827; }
+  html.dark .bg-white  { background-color: #1f2937 !important; }
+  html.dark .bg-gray-50 { background-color: #111827 !important; }
+  html.dark .bg-gray-100 { background-color: #374151 !important; }
+  html.dark .bg-gray-200 { background-color: #4b5563 !important; }
+  html.dark .min-h-screen { background-color: #111827; }
+  html.dark .text-gray-900, html.dark .text-gray-800 { color: #f9fafb !important; }
+  html.dark .text-gray-700 { color: #e5e7eb !important; }
+  html.dark .text-gray-600 { color: #d1d5db !important; }
+  html.dark .text-gray-500 { color: #9ca3af !important; }
+  html.dark .text-gray-400 { color: #6b7280 !important; }
+  html.dark .text-gray-300 { color: #4b5563 !important; }
+  html.dark .border-gray-100 { border-color: #374151 !important; }
+  html.dark .border-gray-200 { border-color: #4b5563 !important; }
+  html.dark .border-gray-300 { border-color: #6b7280 !important; }
+  html.dark input, html.dark select, html.dark textarea { background-color: #374151 !important; color: #f9fafb !important; border-color: #4b5563 !important; }
+  html.dark .shadow-sm { box-shadow: 0 1px 2px rgba(0,0,0,.5) !important; }
+  html.dark .shadow-md { box-shadow: 0 4px 6px rgba(0,0,0,.6) !important; }
+  html.dark .shadow-lg { box-shadow: 0 10px 15px rgba(0,0,0,.7) !important; }
+  html.dark .divide-gray-100 > * + * { border-color: #374151 !important; }
+  html.dark .ring-gray-200 { --tw-ring-color: #4b5563 !important; }
   .amount-font { font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
   .safe-bottom { padding-bottom: calc(80px + env(safe-area-inset-bottom)); }
   .no-scrollbar::-webkit-scrollbar { display: none; }
@@ -41,6 +65,17 @@
   @keyframes slideUpPad { from { transform:translateY(100%); } to { transform:translateY(0); } }
   .pad-enter { animation: slideUpPad .18s cubic-bezier(.32,.72,0,1) both; }
 </style>
+<script>
+  (function(){
+    var t = localStorage.getItem("akr-theme") || "system";
+    var dark = t==="dark"||(t==="system"&&window.matchMedia("(prefers-color-scheme:dark)").matches);
+    if(dark) document.documentElement.classList.add("dark");
+    window.matchMedia("(prefers-color-scheme:dark)").addEventListener("change",function(e){
+      if(localStorage.getItem("akr-theme")==="system")
+        document.documentElement.classList.toggle("dark",e.matches);
+    });
+  })();
+</script>
 </head>
 <body>
 <div id="root"></div>
@@ -1431,31 +1466,54 @@ function LargeDonut({data, total, base, onSelect, selectedId}) {
 
 
 /* ===================== 設定頁 ===================== */
-function AboutView() {
+function OtherView() {
+  const [theme, setTheme] = useState(()=>localStorage.getItem("akr-theme")||"system");
+  const applyTheme = (t) => {
+    const dark = t==="dark"||(t==="system"&&window.matchMedia("(prefers-color-scheme:dark)").matches);
+    document.documentElement.classList.toggle("dark", dark);
+    localStorage.setItem("akr-theme", t);
+    setTheme(t);
+  };
+  const themeOpts = [["light","光亮","☀️"],["dark","黑暗","🌙"],["system","跟隨系統","⚙️"]];
+  const aboutRows = [
+    ["版本","v1.0.260421",false],
+    ["製作者","AKiRa",true],
+    ["技術","React · Tailwind · PWA",false],
+    ["支援幣種","MOP · HKD · CNY · JPY · TWD",false],
+  ];
   return (
     <div className="space-y-3">
+      {/* 主題 */}
+      <div className="bg-white rounded-2xl shadow-sm p-4">
+        <div className="text-sm font-semibold text-gray-700 mb-3">主題</div>
+        <div className="flex gap-2">
+          {themeOpts.map(([v,l,ic])=>(
+            <button key={v} onClick={()=>applyTheme(v)}
+              className={`flex-1 flex flex-col items-center gap-1 py-3 rounded-xl text-xs font-medium border-2 transition-all
+                ${theme===v?"border-[color:var(--brand)] bg-[color:var(--brand-soft)] text-[color:var(--brand)]":"border-gray-100 text-gray-500"}`}>
+              <span className="text-lg">{ic}</span>{l}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* 關於 */}
       <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
-        <div className="flex flex-col items-center py-10 px-6">
-          <img src="icon-192.png" alt="AKR記帳本" className="w-20 h-20 rounded-3xl mb-4 shadow-md object-cover"/>
-          <div className="text-xl font-bold mb-1">AKR記帳本</div>
-          <div className="text-sm text-gray-400 mb-6">繁中 PWA 記帳應用</div>
-          <div className="w-full space-y-3">
-            <div className="flex justify-between items-center py-3 border-b border-gray-100">
-              <span className="text-sm text-gray-500">版本</span>
-              <span className="text-sm font-semibold text-gray-800">v1.0.260421</span>
-            </div>
-            <div className="flex justify-between items-center py-3 border-b border-gray-100">
-              <span className="text-sm text-gray-500">製作者</span>
-              <span className="text-sm font-semibold" style={{color:"var(--brand)"}}>AKiRa</span>
-            </div>
-            <div className="flex justify-between items-center py-3 border-b border-gray-100">
-              <span className="text-sm text-gray-500">技術</span>
-              <span className="text-sm text-gray-600">React · Tailwind · PWA</span>
-            </div>
-            <div className="flex justify-between items-center py-3">
-              <span className="text-sm text-gray-500">支援幣種</span>
-              <span className="text-sm text-gray-600">MOP · HKD · CNY · JPY · TWD</span>
-            </div>
+        <div className="px-4 py-3 border-b border-gray-100">
+          <span className="text-sm font-semibold text-gray-700">關於這個 App</span>
+        </div>
+        <div className="flex flex-col items-center pt-6 pb-4 px-6">
+          <img src="icon-192.png" alt="AKR記帳本" className="w-16 h-16 rounded-2xl mb-3 shadow-md object-cover"/>
+          <div className="text-lg font-bold text-gray-800 mb-1">AKR記帳本</div>
+          <div className="text-xs text-gray-400 mb-5">繁中 PWA 記帳應用</div>
+          <div className="w-full">
+            {aboutRows.map(([l,v,brand],i)=>(
+              <div key={l} className={`flex justify-between items-center py-3 ${i<aboutRows.length-1?"border-b border-gray-100":""}`}>
+                <span className="text-sm text-gray-500">{l}</span>
+                <span className={`text-sm font-semibold ${brand?"":"text-gray-700"}`}
+                  style={brand?{color:"var(--brand)"}:{}}>{v}</span>
+              </div>
+            ))}
           </div>
         </div>
       </div>
@@ -1467,7 +1525,7 @@ function AboutView() {
 function SettingsView({store, setStore, drive}) {
   const [tab, setTab] = useState("cat");
   const [tabDir, setTabDir] = useState(0);
-  const tabs = [["cat","分類"],["budget","預算"],["data","數據"],["basic","幣值"],["about","關於"]];
+  const tabs = [["cat","分類"],["budget","預算"],["data","數據"],["basic","幣值"],["other","其他"]];
   const changeSettingsTab = (k) => {
     if(k===tab) return;
     setTabDir(tabs.findIndex(t=>t[0]===k)>tabs.findIndex(t=>t[0]===tab)?1:-1);
@@ -1486,7 +1544,7 @@ function SettingsView({store, setStore, drive}) {
         {tab==="budget" && <BudgetSettings store={store} setStore={setStore}/>}
         {tab==="data"   && <DataSettings store={store} setStore={setStore} drive={drive}/>}
         {tab==="basic"  && <BasicSettings store={store} setStore={setStore}/>}
-        {tab==="about"  && <AboutView/>}
+        {tab==="other"  && <OtherView/>}
       </div>
     </div>
   );
