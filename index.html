@@ -625,20 +625,17 @@ function App() {
 
   useEffect(()=>{ tabRef.current=tab; }, [tab]);
 
-  // All navigation layers use _backStack; handleBack is a pure stack consumer.
-  // Layer order (LIFO): sub-donut → rateCalc → entryModal → calcPad
-  const handleBack = useCallback(() => {
-    if(consumeBack()) return;
-    if(tabRef.current!=="home"){ changeTab("home"); }
-  }, [changeTab]);
-
-  // Push entryModal close onto back stack while open
+  // Push "go home" when on a non-home tab (bottom of back stack for that tab).
+  // Cleanup automatically pops it when tab changes away.
   useEffect(()=>{
-    if(!entryOpen) return;
-    const fn = ()=>setEntryCloseSignal(s=>s+1);
+    if(tab==="home") return;
+    const fn = ()=>changeTab("home");
     pushBack(fn);
     return ()=>popBack(fn);
-  }, [entryOpen]);
+  }, [tab, changeTab]);
+
+  // handleBack is a pure stack consumer — all layers manage themselves.
+  const handleBack = useCallback(()=>{ consumeBack(); }, []);
 
   useEffect(() => {
     const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) ||
@@ -2112,7 +2109,17 @@ function EntryModal({entry, store, base, rates, onSave, onDelete, onClose, close
     return ec?.parentId||null;
   });
 
-  // Android back：計算盤開啟時先收回計算盤
+  // LAYER 1 (declared first): push "close modal" when this modal mounts.
+  // Must be declared BEFORE the calcOpen effect so it sits lower in the stack.
+  const handleCloseRef = useRef(handleClose);
+  useEffect(()=>{ handleCloseRef.current = handleClose; });
+  useEffect(()=>{
+    const fn = ()=>handleCloseRef.current();
+    pushBack(fn);
+    return ()=>popBack(fn);
+  }, []); // mount/unmount only
+
+  // LAYER 2 (declared second): push "close calc pad" when calc pad is open.
   useEffect(()=>{
     if(!calcOpen) return;
     const fn = ()=>setCalcOpen(false);
