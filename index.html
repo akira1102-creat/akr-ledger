@@ -624,14 +624,21 @@ function App() {
   useEffect(() => { saveStore(store); }, [store]);
 
   useEffect(()=>{ tabRef.current=tab; }, [tab]);
-  const entryOpenRef = useRef(entryOpen);
-  useEffect(()=>{ entryOpenRef.current=entryOpen; }, [entryOpen]);
 
+  // All navigation layers use _backStack; handleBack is a pure stack consumer.
+  // Layer order (LIFO): sub-donut → rateCalc → entryModal → calcPad
   const handleBack = useCallback(() => {
     if(consumeBack()) return;
-    if(entryOpenRef.current){ setEntryCloseSignal(s=>s+1); return; }
     if(tabRef.current!=="home"){ changeTab("home"); }
   }, [changeTab]);
+
+  // Push entryModal close onto back stack while open
+  useEffect(()=>{
+    if(!entryOpen) return;
+    const fn = ()=>setEntryCloseSignal(s=>s+1);
+    pushBack(fn);
+    return ()=>popBack(fn);
+  }, [entryOpen]);
 
   useEffect(() => {
     const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) ||
@@ -1482,6 +1489,14 @@ function BasicSettings({store, setStore}) {
   const [fetchingRates, setFetchingRates] = useState(false);
   const [rateMsg, setRateMsg] = useState("");
   const [rateCalc, setRateCalc] = useState(null); // {code, expr}
+
+  // Push rateCalc close onto back stack while open
+  useEffect(()=>{
+    if(!rateCalc) return;
+    const fn = ()=>setRateCalc(null);
+    pushBack(fn);
+    return ()=>popBack(fn);
+  }, [!!rateCalc]);
 
   const openRateCalc = (code) => setRateCalc({code, expr: String(rates[code]||"")});
   const handleRateKey = (key) => {
