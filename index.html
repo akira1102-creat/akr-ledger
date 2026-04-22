@@ -2289,13 +2289,13 @@ function CalcPad({expr, onKey}) {
     ["1","2","3","−"],
     ["AC","0",".","＋"],
   ];
-  const btnBase = "flex items-center justify-center rounded-2xl text-lg font-semibold active:scale-90 transition-transform duration-75 select-none";
+  const btnBase = "flex items-center justify-center rounded-2xl text-xl font-semibold active:scale-90 transition-transform duration-75 select-none";
   return (
     <div className="flex-shrink-0 bg-white border-t border-gray-100 pad-enter">
       <div className="grid grid-cols-4 gap-2 p-3 pb-1.5">
         {rows.map((row,ri)=>row.map(k=>(
           <button key={ri+k} onPointerDown={e=>{e.preventDefault();onKey(k);}}
-            className={`${btnBase} h-13 ${k==="AC"?"bg-red-50 text-red-400":["÷","×","−","＋"].includes(k)?"text-[color:var(--brand)]":"bg-gray-100 text-gray-700"}`}
+            className={`${btnBase} h-14 ${k==="AC"?"bg-red-50 text-red-400":["÷","×","−","＋"].includes(k)?"text-[color:var(--brand)]":"bg-gray-100 text-gray-700"}`}
             style={["÷","×","−","＋"].includes(k)?{background:"var(--brand-soft)"}:{}}>
             {k}
           </button>
@@ -2303,11 +2303,11 @@ function CalcPad({expr, onKey}) {
       </div>
       <div className="grid grid-cols-3 gap-2 px-3 pb-3">
         <button onPointerDown={e=>{e.preventDefault();onKey("⌫");}}
-          className={`${btnBase} h-12 bg-gray-100 text-gray-700`}>⌫</button>
+          className={`${btnBase} h-14 bg-gray-100 text-gray-700`}>⌫</button>
         <button onPointerDown={e=>{e.preventDefault();onKey("=");}}
-          className={`${btnBase} h-12 bg-gray-200 text-gray-700`}>=</button>
+          className={`${btnBase} h-14 bg-gray-200 text-gray-700`}>=</button>
         <button onPointerDown={e=>{e.preventDefault();onKey("✓");}}
-          className={`${btnBase} h-12 text-white`} style={{background:"linear-gradient(135deg,#FF8FA3,#FF6B8A)"}}>完成</button>
+          className={`${btnBase} h-14 text-white`} style={{background:"linear-gradient(135deg,#FF8FA3,#FF6B8A)"}}>完成</button>
       </div>
     </div>
   );
