@@ -359,31 +359,31 @@ function useGistSync(store, setStore) {
 const DEFAULT_EXPENSE_CATS = [
   // 飲食
   { id:"food",      name:"飲食",           icon:"🍜", color:"#FFB4A2" },
-  { id:"breakfast", name:"早餐",           icon:"🌅", color:"#FFB4A2", parentId:"food" },
+  { id:"breakfast", name:"早餐",           icon:"🌅", color:"#FDBA74", parentId:"food" },
   { id:"lunch",     name:"午餐",           icon:"🍱", color:"#FFB4A2", parentId:"food" },
-  { id:"dinner",    name:"晚餐",           icon:"🍽️", color:"#FFB4A2", parentId:"food" },
+  { id:"dinner",    name:"晚餐",           icon:"🍽️", color:"#F87171", parentId:"food" },
   { id:"drink",     name:"飲品",           icon:"🧋", color:"#9BD1E5", parentId:"food" },
-  { id:"snack",     name:"零食",           icon:"🍬", color:"#FFB4A2", parentId:"food" },
+  { id:"snack",     name:"零食",           icon:"🍬", color:"#FCD34D", parentId:"food" },
   { id:"alcohol",   name:"酒類",           icon:"🍺", color:"#B5A6F5", parentId:"food" },
-  { id:"grocery",   name:"食材雜貨",       icon:"🥬", color:"#FFB4A2", parentId:"food" },
+  { id:"grocery",   name:"食材雜貨",       icon:"🥬", color:"#86EFAC", parentId:"food" },
   // 日常消費
   { id:"daily",     name:"日常消費",       icon:"🛒", color:"#F7C873" },
   { id:"transit",   name:"交通費",         icon:"🚆", color:"#9BD1E5", parentId:"daily" },
   { id:"shop",      name:"服裝",           icon:"👕", color:"#F5A6C9", parentId:"daily" },
   { id:"fun",       name:"娛樂",           icon:"🎮", color:"#B5A6F5", parentId:"daily" },
   { id:"med",       name:"健康",           icon:"🏥", color:"#F29E9E", parentId:"daily" },
-  { id:"home",      name:"日常用品",       icon:"🧴", color:"#F7C873", parentId:"daily" },
+  { id:"home",      name:"日常用品",       icon:"🧴", color:"#FBBF24", parentId:"daily" },
   { id:"edu",       name:"學習/工作用品",  icon:"📚", color:"#C9A0DC", parentId:"daily" },
   { id:"pickup",    name:"取貨費",         icon:"📦", color:"#CBD5E1", parentId:"daily" },
   // 人際社交
   { id:"social",    name:"人際社交",       icon:"👥", color:"#F5A6C9" },
   { id:"family",    name:"家人",           icon:"🏠", color:"#F5A6C9", parentId:"social" },
-  { id:"friend",    name:"朋友",           icon:"👫", color:"#F5A6C9", parentId:"social" },
-  { id:"coworker",  name:"同事",           icon:"🤝", color:"#F5A6C9", parentId:"social" },
+  { id:"friend",    name:"朋友",           icon:"👫", color:"#FDA4AF", parentId:"social" },
+  { id:"coworker",  name:"同事",           icon:"🤝", color:"#FBBF24", parentId:"social" },
   // 水電雜費
   { id:"util",      name:"水電雜費",       icon:"💡", color:"#A7E0A0" },
   { id:"bill",      name:"電費",           icon:"⚡", color:"#A7E0A0", parentId:"util" },
-  { id:"water",     name:"水費",           icon:"💧", color:"#A7E0A0", parentId:"util" },
+  { id:"water",     name:"水費",           icon:"💧", color:"#7DD3FC", parentId:"util" },
   { id:"gasfee",    name:"煤氣費",         icon:"🔥", color:"#FF7043", parentId:"util" },
   { id:"tel",       name:"通訊費",         icon:"📱", color:"#8BCEC2", parentId:"util" },
   // 其他
@@ -1364,7 +1364,7 @@ function ChartView({store, rates, base, entries, allEntries, viewMonth, onEdit})
           <div className="py-10 text-center text-gray-400 text-sm">本期暫無支出</div>
         ):(()=>{
           const inSub=!!(selectedCatId&&childExpData.length>0);
-          const activeData=inSub?childExpData:pieData;
+          const activeData=dedupeColors(inSub?childExpData:pieData);
           const activeTotal=inSub?childExpData.reduce((s,d)=>s+d.value,0):totalExp;
           const activeSelected=inSub?selectedChildId:selectedCatId;
           const handleSelect=inSub
@@ -1527,6 +1527,18 @@ function ChartView({store, rates, base, entries, allEntries, viewMonth, onEdit})
     })()}
     </React.Fragment>
   );
+}
+
+const CHART_PALETTE = ["#FFB4A2","#9BD1E5","#B5A6F5","#FCD34D","#86EFAC","#FDBA74","#F87171","#FDA4AF","#7DD3FC","#FBBF24","#A7E0A0","#C9A0DC","#F5A6C9","#8BCEC2","#F29E9E","#CBD5E1","#FF7043","#36B7C6"];
+function dedupeColors(data) {
+  const seen = new Set();
+  let pi = 0;
+  return data.map(d => {
+    if (!seen.has(d.cat.color)) { seen.add(d.cat.color); return d; }
+    let c; do { c = CHART_PALETTE[pi++ % CHART_PALETTE.length]; } while (seen.has(c));
+    seen.add(c);
+    return { ...d, cat: { ...d.cat, color: c } };
+  });
 }
 
 function LargeDonut({data, total, base, onSelect, selectedId}) {
