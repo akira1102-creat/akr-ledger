@@ -574,11 +574,17 @@ function SummaryPill({label, value, color}) {
     </div>
   );
 }
-function TabBtn({active, onClick, icon, label}) {
+const TAB_ICONS = {
+  home: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" width="22" height="22"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>,
+  cal:  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" width="22" height="22"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>,
+  chart:<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" width="22" height="22"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/><line x1="2" y1="20" x2="22" y2="20"/></svg>,
+  set:  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" width="22" height="22"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>,
+};
+function TabBtn({active, onClick, iconKey, label}) {
   return (
-    <button onClick={onClick} className="tab-btn flex flex-col items-center justify-center">
-      <div className="text-xl leading-none">{icon}</div>
-      <div className={`text-[11px] mt-1 ${active?"text-[color:var(--brand)] font-semibold":"text-gray-500"}`}>{label}</div>
+    <button onClick={onClick} className="tab-btn flex flex-col items-center justify-center gap-0.5">
+      <div className={`transition-colors ${active?"text-[color:var(--brand)]":"text-gray-400"}`}>{TAB_ICONS[iconKey]}</div>
+      <div className={`text-[10px] font-medium transition-colors ${active?"text-[color:var(--brand)]":"text-gray-400"}`}>{label}</div>
     </button>
   );
 }
@@ -831,18 +837,17 @@ function App() {
           </div>
         </div>
         {/* ── Month nav ── */}
-        <div className="px-4 py-3 flex items-center justify-between">
-          <button onClick={()=>shiftMonth(setViewMonth,viewMonth,-1)} className="w-9 h-9 rounded-full hover:bg-gray-100 text-gray-500 text-xl">‹</button>
+        <div className="px-4 py-2.5 flex items-center justify-between">
+          <button onClick={()=>shiftMonth(setViewMonth,viewMonth,-1)} className="w-9 h-9 rounded-full active:bg-gray-100 text-gray-400 flex items-center justify-center">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="18" height="18"><polyline points="15 18 9 12 15 6"/></svg>
+          </button>
           <div className="text-center">
-            <div className="text-xs text-gray-400">{base} 主要幣值</div>
-            <div className="text-base font-semibold">{viewMonth.replace("-"," 年 ")} 月</div>
+            <div className="text-[11px] text-gray-400 mb-0.5">{base} 主要幣值</div>
+            <div className="text-base font-bold tracking-wide">{viewMonth.replace("-"," 年 ")} 月</div>
           </div>
-          <button onClick={()=>shiftMonth(setViewMonth,viewMonth,+1)} className="w-9 h-9 rounded-full hover:bg-gray-100 text-gray-500 text-xl">›</button>
-        </div>
-        <div className="px-4 pb-3 grid grid-cols-3 gap-2">
-          <SummaryPill label="收入" value={fmt(monthTotals.inc,base)} color="text-[color:var(--income)]" />
-          <SummaryPill label="支出" value={fmt(monthTotals.exp,base)} color="text-[color:var(--expense)]" />
-          <SummaryPill label="結餘" value={fmt(monthTotals.net,base)} color={monthTotals.net>=0?"text-gray-800":"text-[color:var(--expense)]"} />
+          <button onClick={()=>shiftMonth(setViewMonth,viewMonth,+1)} className="w-9 h-9 rounded-full active:bg-gray-100 text-gray-400 flex items-center justify-center">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="18" height="18"><polyline points="9 18 15 12 9 6"/></svg>
+          </button>
         </div>
       </header>
 
@@ -855,16 +860,16 @@ function App() {
         </div>
       </main>
 
-      <button onClick={openAdd} className="fixed right-5 bottom-24 w-14 h-14 rounded-full shadow-lg grid place-items-center active:scale-95" style={{background:"var(--brand)",color:"white"}} aria-label="新增記帳">
-        <span className="text-3xl leading-none -mt-1">+</span>
+      <button onClick={openAdd} className="fixed right-5 bottom-24 w-14 h-14 rounded-full grid place-items-center active:scale-90 transition-transform duration-100" style={{background:"linear-gradient(135deg,#FF8FA3,#FF6B8A)",color:"white",boxShadow:"0 6px 24px rgba(255,107,138,0.5)"}} aria-label="新增記帳">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" width="28" height="28"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
       </button>
 
       <nav className="fixed bottom-0 inset-x-0 bg-white border-t border-gray-100 z-10">
         <div className="grid grid-cols-4 h-16" style={{paddingBottom:"env(safe-area-inset-bottom)"}}>
-          <TabBtn active={tab==="home"}  onClick={()=>changeTab("home")}  icon="🏠" label="首頁" />
-          <TabBtn active={tab==="cal"}   onClick={()=>changeTab("cal")}   icon="📅" label="月曆" />
-          <TabBtn active={tab==="chart"} onClick={()=>changeTab("chart")} icon="📊" label="圖表" />
-          <TabBtn active={tab==="set"}   onClick={()=>changeTab("set")}   icon="⚙️" label="設定" />
+          <TabBtn active={tab==="home"}  onClick={()=>changeTab("home")}  iconKey="home"  label="首頁" />
+          <TabBtn active={tab==="cal"}   onClick={()=>changeTab("cal")}   iconKey="cal"   label="月曆" />
+          <TabBtn active={tab==="chart"} onClick={()=>changeTab("chart")} iconKey="chart" label="圖表" />
+          <TabBtn active={tab==="set"}   onClick={()=>changeTab("set")}   iconKey="set"   label="設定" />
         </div>
       </nav>
 
@@ -960,56 +965,22 @@ function HomeView({store, rates, base, entries, onEdit, onDelete, onCopy, monthT
 
   return (
     <div className="px-3 pt-3 space-y-3">
-      {/* 支出概況卡片 */}
-      <div className="bg-white rounded-2xl shadow-sm p-4">
-        <div className="text-sm font-semibold mb-3">💳 支出概況</div>
-        {[
-          {label:"本月", exp:monthExp, budget:tb,         sub:tb>0?`共 ${daysInMonth} 日`:null, net:monthTotals.net},
-          {label:"本週", exp:weekExp,  budget:weekBudget, sub:tb>0?`共 ${daysThisWeek} 日`:null, net:null},
-          {label:"今日", exp:todayExp, budget:dayBudget,  sub:null, net:null},
-        ].map(({label,exp,budget,sub,net})=>{
-          const has=budget>0;
-          // 本月結餘同步置頂：用 net（已含預算+收入-支出）；其他行用 budget-exp
-          const remain=has?(net!==null?net:budget-exp):0;
-          const pct=has?Math.min(100,exp/budget*100):0, over=has&&remain<0;
-          return (
-            <div key={label} className="mb-4 last:mb-0">
-              <div className="flex items-center justify-between mb-1">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-sm text-gray-500 font-medium">{label}</span>
-                  {sub&&<span className="text-[10px] text-gray-300">{sub}</span>}
-                </div>
-                {has
-                  ? <span className={`text-lg font-bold amount-font ${over?"text-[color:var(--expense)]":"text-gray-800"}`}>{over?`-${fmt(Math.abs(remain),base)}`:fmt(remain,base)}</span>
-                  : <span className="text-lg font-bold amount-font text-gray-800">{fmt(exp,base)}</span>
-                }
-              </div>
-              {has&&(
-                <>
-                  <div className="h-2.5 bg-gray-100 rounded-full overflow-hidden mb-1">
-                    <div className="h-full rounded-full transition-all duration-300" style={{width:pct+"%",background:over?"var(--expense)":"#4CAF50"}}></div>
-                  </div>
-                  <div className={`text-[11px] ${over?"text-[color:var(--expense)] font-semibold":"text-gray-400"}`}>
-                    {over?`⚠️ 已超出預算，已用 ${fmt(exp,base)}`:`已用 ${fmt(exp,base)}`}
-                  </div>
-                </>
-              )}
-            </div>
-          );
-        })}
-        {tb===0&&<div className="mt-1 text-[11px] text-gray-400 text-center">設定總預算後可顯示剩餘可用金額</div>}
-      </div>
-
       {/* 本月收支 + mini donut */}
       <div className="bg-white rounded-2xl shadow-sm p-4">
         <div className="text-sm font-semibold mb-3">{ym1} 年 {ym2} 月 收支</div>
         <div className="flex items-center gap-3">
-          <div className="flex-1 space-y-1.5 min-w-0">
-            <div className="flex justify-between text-xs"><span className="text-gray-500">收入</span><span className="amount-font text-[color:var(--income)]">{fmt(monthTotals.inc,base)}</span></div>
-            <div className="flex justify-between text-xs"><span className="text-gray-500">支出</span><span className="amount-font text-[color:var(--expense)]">{fmt(monthTotals.exp,base)}</span></div>
-            <div className="flex justify-between text-sm font-semibold border-t border-gray-100 pt-1.5">
-              <span>結餘</span>
-              <span className={`amount-font ${monthTotals.net>=0?"text-gray-800":"text-[color:var(--expense)]"}`}>{fmt(monthTotals.net,base)}</span>
+          <div className="flex-1 space-y-2 min-w-0">
+            <div className="flex justify-between items-center">
+              <span className="text-xs text-gray-400">收入</span>
+              <span className="text-sm font-semibold amount-font text-[color:var(--income)]">{fmt(monthTotals.inc,base)}</span>
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="text-xs text-gray-400">支出</span>
+              <span className="text-sm font-semibold amount-font text-[color:var(--expense)]">{fmt(monthTotals.exp,base)}</span>
+            </div>
+            <div className="flex justify-between items-center border-t border-gray-100 pt-2">
+              <span className="text-sm font-bold">結餘</span>
+              <span className={`text-base font-bold amount-font ${monthTotals.net>=0?"text-gray-800":"text-[color:var(--expense)]"}`}>{fmt(monthTotals.net,base)}</span>
             </div>
           </div>
           {(()=>{
@@ -1076,6 +1047,45 @@ function HomeView({store, rates, base, entries, onEdit, onDelete, onCopy, monthT
         )}
       </div>
 
+      {/* 支出概況卡片 */}
+      <div className="bg-white rounded-2xl shadow-sm p-4">
+        <div className="text-sm font-semibold mb-3">支出概況</div>
+        {[
+          {label:"本月", exp:monthExp, budget:tb,         sub:tb>0?`共 ${daysInMonth} 日`:null, net:monthTotals.net},
+          {label:"本週", exp:weekExp,  budget:weekBudget, sub:tb>0?`共 ${daysThisWeek} 日`:null, net:null},
+          {label:"今日", exp:todayExp, budget:dayBudget,  sub:null, net:null},
+        ].map(({label,exp,budget,sub,net})=>{
+          const has=budget>0;
+          const remain=has?(net!==null?net:budget-exp):0;
+          const pct=has?Math.min(100,exp/budget*100):0, over=has&&remain<0;
+          return (
+            <div key={label} className="mb-4 last:mb-0">
+              <div className="flex items-center justify-between mb-1.5">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-sm text-gray-500 font-medium">{label}</span>
+                  {sub&&<span className="text-[10px] text-gray-300">{sub}</span>}
+                </div>
+                {has
+                  ? <span className={`text-base font-bold amount-font ${over?"text-[color:var(--expense)]":"text-gray-800"}`}>{over?`-${fmt(Math.abs(remain),base)}`:fmt(remain,base)}</span>
+                  : <span className="text-base font-bold amount-font text-gray-800">{fmt(exp,base)}</span>
+                }
+              </div>
+              {has&&(
+                <>
+                  <div className="h-2 bg-gray-100 rounded-full overflow-hidden mb-1">
+                    <div className="h-full rounded-full transition-all duration-500" style={{width:pct+"%",background:over?"var(--expense)":"var(--income)"}}></div>
+                  </div>
+                  <div className={`text-[11px] ${over?"text-[color:var(--expense)] font-semibold":"text-gray-400"}`}>
+                    {over?`⚠️ 已超出預算，已用 ${fmt(exp,base)}`:`已用 ${fmt(exp,base)}`}
+                  </div>
+                </>
+              )}
+            </div>
+          );
+        })}
+        {tb===0&&<div className="mt-1 text-[11px] text-gray-400 text-center">設定總預算後可顯示剩餘可用金額</div>}
+      </div>
+
       {/* 搜尋 + 記帳明細 */}
       <div className="flex items-center gap-2 px-1">
         <div className="flex-1 flex items-center gap-2 bg-white rounded-xl shadow-sm px-3 py-2">
@@ -1094,11 +1104,17 @@ function HomeView({store, rates, base, entries, onEdit, onDelete, onCopy, monthT
           {visibleGroups.map(([date,list])=>{
             const daySum=list.reduce((acc,e)=>{const v=toBase(e.amount,e.currency,rates,base);return e.type==="income"?acc+v:acc-v;},0);
             const d=parseISO(date);
+            const diffDays=Math.round((new Date(todayISO)-new Date(date))/86400000);
+            const dayLabel=diffDays===0?"今天":diffDays===1?"昨天":null;
             return (
               <div key={date} className="bg-white rounded-2xl shadow-sm overflow-hidden">
-                <div className="px-4 py-2 flex items-center justify-between" style={{background:"var(--brand-soft)"}}>
-                  <div className="text-sm"><span className="font-semibold">{date.slice(5).replace("-","/")}</span><span className="ml-2 text-gray-500">週{weekdayZH[d.getDay()]}</span></div>
-                  <div className={`text-sm amount-font ${daySum>=0?"text-[color:var(--income)]":"text-[color:var(--expense)]"}`}>{daySum>=0?"+":""}{fmt(daySum,base)}</div>
+                <div className="px-4 py-2.5 flex items-center justify-between border-b border-gray-50">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-bold text-gray-700">{date.slice(5).replace("-","/")}</span>
+                    <span className="text-xs text-gray-400">週{weekdayZH[d.getDay()]}</span>
+                    {dayLabel&&<span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md" style={{background:"var(--brand-soft)",color:"var(--brand)"}}>{dayLabel}</span>}
+                  </div>
+                  <div className={`text-sm font-semibold amount-font ${daySum>=0?"text-[color:var(--income)]":"text-[color:var(--expense)]"}`}>{daySum>=0?"+":""}{fmt(daySum,base)}</div>
                 </div>
                 <ul>
                   {list.map(e=>{
@@ -1627,7 +1643,7 @@ function OtherView() {
     }
   };
   const aboutRows = [
-    ["版本","v1.0.260421",false],
+    ["版本","v1.0.260422",false],
     ["製作者","AKiRa",true],
     ["技術","React · Tailwind · PWA",false],
     ["支援幣種","MOP · HKD · CNY · JPY · TWD",false],
@@ -2273,24 +2289,25 @@ function CalcPad({expr, onKey}) {
     ["1","2","3","−"],
     ["AC","0",".","＋"],
   ];
-  const btnBase = "flex items-center justify-center rounded-2xl text-lg font-semibold active:opacity-60 select-none";
+  const btnBase = "flex items-center justify-center rounded-2xl text-lg font-semibold active:scale-90 transition-transform duration-75 select-none";
   return (
     <div className="flex-shrink-0 bg-white border-t border-gray-100 pad-enter">
-      <div className="grid grid-cols-4 gap-1.5 p-3 pb-1">
+      <div className="grid grid-cols-4 gap-2 p-3 pb-1.5">
         {rows.map((row,ri)=>row.map(k=>(
           <button key={ri+k} onPointerDown={e=>{e.preventDefault();onKey(k);}}
-            className={`${btnBase} h-12 ${k==="AC"?"bg-red-50 text-red-500":["÷","×","−","＋"].includes(k)?"bg-[color:var(--brand-soft)] text-[color:var(--brand)]":"bg-gray-100 text-gray-800"}`}>
+            className={`${btnBase} h-13 ${k==="AC"?"bg-red-50 text-red-400":["÷","×","−","＋"].includes(k)?"text-[color:var(--brand)]":"bg-gray-100 text-gray-700"}`}
+            style={["÷","×","−","＋"].includes(k)?{background:"var(--brand-soft)"}:{}}>
             {k}
           </button>
         )))}
       </div>
-      <div className="grid grid-cols-3 gap-1.5 px-3 pb-3">
+      <div className="grid grid-cols-3 gap-2 px-3 pb-3">
         <button onPointerDown={e=>{e.preventDefault();onKey("⌫");}}
-          className={`${btnBase} h-12 bg-gray-100 text-gray-800`}>⌫</button>
+          className={`${btnBase} h-12 bg-gray-100 text-gray-700`}>⌫</button>
         <button onPointerDown={e=>{e.preventDefault();onKey("=");}}
-          className={`${btnBase} h-12 bg-gray-200 text-gray-800`}>=</button>
+          className={`${btnBase} h-12 bg-gray-200 text-gray-700`}>=</button>
         <button onPointerDown={e=>{e.preventDefault();onKey("✓");}}
-          className={`${btnBase} h-12 text-white`} style={{background:"var(--brand)"}}>完成</button>
+          className={`${btnBase} h-12 text-white`} style={{background:"linear-gradient(135deg,#FF8FA3,#FF6B8A)"}}>完成</button>
       </div>
     </div>
   );
