@@ -1007,14 +1007,28 @@ function HomeView({store, rates, base, entries, onEdit, onDelete, onCopy, monthT
   const todayExp = useMemo(()=>entries.filter(e=>e.type==="expense"&&e.date===todayISO).reduce((s,e)=>s+toBase(e.amount,e.currency,rates,base),0),[entries,rates,base,todayISO]);
   const weekExp  = useMemo(()=>entries.filter(e=>e.type==="expense"&&e.date>=weekStartISO).reduce((s,e)=>s+toBase(e.amount,e.currency,rates,base),0),[entries,rates,base,weekStartISO]);
   const monthExp = monthTotals.exp;
-  const tb = monthTotals.tb ?? 0; // effective budget (monthly or total)
+  const tb = monthTotals.tb ?? 0;
 
   const [ymY, ymM] = viewMonth.split("-").map(Number);
   const daysInMonth = new Date(ymY, ymM, 0).getDate();
-  const dayBudget   = tb > 0 ? tb/daysInMonth : 0;
-  const weekStartDate = weekStart.getDate();
-  const daysThisWeek  = Math.min(weekStartDate+6, daysInMonth) - weekStartDate + 1;
-  const weekBudget    = dayBudget * daysThisWeek;
+  const isCurrentMonth = viewMonth === todayISO.slice(0,7);
+
+  // ── 動態每日／每週可用預算（只在當月生效）──
+  // 剩餘預算：如果開了「預算納入結餘」就用 net（已含收入），否則用 tb - 本月支出
+  const budgetInBalance = store.budgetInBalance && tb > 0;
+  const remainingBudget = tb > 0 ? (budgetInBalance ? monthTotals.net : tb - monthExp) : 0;
+  const todayDate = now.getDate();
+  const remainingDays = isCurrentMonth ? (daysInMonth - todayDate + 1) : daysInMonth;
+  // 今日可用 = 剩餘預算 ÷ 剩餘天數
+  const dayAllowance = tb > 0 && remainingDays > 0 ? remainingBudget / remainingDays : 0;
+  // 本週剩餘天數（從今天起，最多到本月底）
+  const weekEndDate = Math.min(weekStart.getDate() + 6, daysInMonth);
+  const remainingDaysThisWeek = isCurrentMonth ? Math.max(1, weekEndDate - todayDate + 1) : Math.min(weekStart.getDate()+6,daysInMonth) - weekStart.getDate() + 1;
+  // 本週可用 = 今日可用 × 本週剩餘天數
+  const weekAllowance = dayAllowance * remainingDaysThisWeek;
+  // 靜態備用（非當月）
+  const dayBudget  = tb > 0 ? tb/daysInMonth : 0;
+  const weekBudget = dayBudget * (Math.min(weekStart.getDate()+6,daysInMonth) - weekStart.getDate() + 1);
 
   const expCatMap = store.categories.expense.reduce((a,c)=>{a[c.id]=c;return a;},{});
   const catMap = [...store.categories.expense,...store.categories.income].reduce((a,c)=>{a[c.id]=c;return a;},{});
@@ -1142,9 +1156,9 @@ function HomeView({store, rates, base, entries, onEdit, onDelete, onCopy, monthT
       <div className="bg-white rounded-2xl shadow-sm p-4">
         <div className="text-sm font-semibold mb-3">支出概況</div>
         {[
-          {label:"本月", exp:monthExp, budget:tb,         sub:tb>0?`共 ${daysInMonth} 日`:null, net:monthTotals.net},
-          {label:"本週", exp:weekExp,  budget:weekBudget, sub:tb>0?`共 ${daysThisWeek} 日`:null, net:null},
-          {label:"今日", exp:todayExp, budget:dayBudget,  sub:null, net:null},
+          {label:"本月", exp:monthExp, budget:tb,          sub:tb>0?`共 ${daysInMonth} 日`:null,                                         net:monthTotals.net},
+          {label:"本週", exp:todayExp, budget:isCurrentMonth?weekAllowance:weekBudget, sub:tb>0?`剩 ${remainingDaysThisWeek} 日`:null,   net:null},
+          {label:"今日", exp:todayExp, budget:isCurrentMonth?dayAllowance:dayBudget,   sub:tb>0?`剩 ${remainingDays} 日均分`:null,       net:null},
         ].map(({label,exp,budget,sub,net})=>{
           const has=budget>0;
           const remain=has?(net!==null?net:budget-exp):0;
