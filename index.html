@@ -1157,7 +1157,7 @@ function HomeView({store, rates, base, entries, onEdit, onDelete, onCopy, monthT
         <div className="text-sm font-semibold mb-3">支出概況</div>
         {[
           {label:"本月", exp:monthExp, budget:tb,          sub:tb>0?`共 ${daysInMonth} 日`:null,                                         net:monthTotals.net},
-          {label:"本週", exp:todayExp, budget:isCurrentMonth?weekAllowance:weekBudget, sub:tb>0?`剩 ${remainingDaysThisWeek} 日`:null,   net:null},
+          {label:"本週", exp:weekExp,  budget:isCurrentMonth?weekAllowance:weekBudget, sub:tb>0?`剩 ${remainingDaysThisWeek} 日`:null,   net:null},
           {label:"今日", exp:todayExp, budget:isCurrentMonth?dayAllowance:dayBudget,   sub:tb>0?`剩 ${remainingDays} 日均分`:null,       net:null},
         ].map(({label,exp,budget,sub,net})=>{
           const has=budget>0;
