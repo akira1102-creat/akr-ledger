@@ -2615,8 +2615,7 @@ function EntryModal({entry, store, base, rates, onSave, onDelete, onClose, close
                     setCatTab(parent.id);
                     if(children.length===0) setCategory(parent.id);
                   }}
-                    className="w-full flex flex-col items-center gap-1 py-3 px-1 text-center transition-colors relative"
-                    style={{background: highlight ? "white" : "transparent"}}>
+                    className={`w-full flex flex-col items-center gap-1 py-3 px-1 text-center transition-colors relative ${highlight?"bg-white":"bg-transparent"}`}>
                     {highlight && <div className="absolute left-0 top-2 bottom-2 w-0.5 rounded-r" style={{background:parent.color}}/>}
                     <div className="w-9 h-9 rounded-xl grid place-items-center text-xl" style={{background:parent.color+"33"}}>{parent.icon}</div>
                     <span className="text-[10px] leading-tight text-gray-600 font-medium w-full truncate px-1" style={{fontWeight:highlight?700:400}}>{parent.name}</span>
@@ -2641,8 +2640,8 @@ function EntryModal({entry, store, base, rates, onSave, onDelete, onClose, close
                       const isSel=category===c.id;
                       return (
                         <button key={c.id} onClick={e=>{ e.stopPropagation(); setCategory(c.id); }}
-                          className="flex flex-col items-center gap-1 py-2.5 px-1 rounded-xl transition-all text-center"
-                          style={{background: isSel ? c.color+"33" : "#F9FAFB", outline: isSel?`2px solid ${c.color}`:"none"}}>
+                          className={`flex flex-col items-center gap-1 py-2.5 px-1 rounded-xl transition-all text-center ${isSel?"":"bg-gray-50"}`}
+                          style={isSel?{background:c.color+"33",outline:`2px solid ${c.color}`}:{outline:"none"}}>
                           <span className="text-xl">{c.icon}</span>
                           <span className="text-[10px] leading-tight text-gray-600 font-medium truncate w-full px-1" style={{fontWeight:isSel?700:400}}>{c.name}</span>
                         </button>
