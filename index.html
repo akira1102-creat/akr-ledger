@@ -708,8 +708,8 @@ function SortableList({ items, renderItem, onReorder, itemHeight = 68 }) {
 // Named back-navigation layers — priority order is fixed (index 0 = highest).
 // Each slot holds at most one handler. consumeBack fires the highest-priority
 // active layer, so push ordering never matters.
-const _layers = { calcPad:null, entryModal:null, chartPanel:null, chartSub:null, goHome:null };
-const _layerOrder = ['calcPad','entryModal','chartPanel','chartSub','goHome'];
+const _layers = { calcPad:null, entryModal:null, chartPanel:null, chartSub:null, settingsTab:null, goHome:null };
+const _layerOrder = ['calcPad','entryModal','chartPanel','chartSub','settingsTab','goHome'];
 const setLayer   = (name, fn) => { _layers[name] = fn; };
 const clearLayer = (name)     => { _layers[name] = null; };
 const consumeBack = () => {
@@ -1867,6 +1867,11 @@ function OtherView() {
 
 function SettingsView({store, setStore, drive}) {
   const [tab, setTab] = useState(null);
+  useEffect(()=>{
+    if(tab){ setLayer('settingsTab', ()=>setTab(null)); }
+    else { clearLayer('settingsTab'); }
+    return ()=>clearLayer('settingsTab');
+  },[tab]);
   const menu = [
     {key:"cat",   icon:"🏷️", label:"分類管理",   desc:"新增、編輯、排序收支分類",     bg:"#FFF0F3"},
     {key:"budget",icon:"💰", label:"預算設定",   desc:"設定月度總預算及各分類上限",   bg:"#F0FFF4"},
