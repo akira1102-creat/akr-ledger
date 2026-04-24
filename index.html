@@ -16,8 +16,18 @@
   :root {
     --brand: #FF6B8A;
     --brand-soft: #FFF0F3;
+    --brand-from: #FF8FA3;
+    --brand-to: #FF6B8A;
+    --brand-glow: rgba(255,107,138,0.5);
     --income: #2ECC71;
     --expense: #E74C3C;
+  }
+  html.accent-sky {
+    --brand: #0EA5E9;
+    --brand-soft: #E0F2FE;
+    --brand-from: #38BDF8;
+    --brand-to: #0EA5E9;
+    --brand-glow: rgba(14,165,233,0.45);
   }
   * { -webkit-tap-highlight-color: transparent; box-sizing: border-box; }
   html { overscroll-behavior-x: none; }
@@ -25,6 +35,7 @@
 
   /* ── Dark Mode ── */
   html.dark { --brand-soft: rgba(255,107,138,0.15); }
+  html.dark.accent-sky { --brand-soft: rgba(14,165,233,0.15); }
   html.dark body { background: #111827; color: #f9fafb; }
   html.dark .bg-white  { background-color: #1f2937 !important; }
   html.dark .bg-gray-50 { background-color: #111827 !important; }
@@ -77,6 +88,7 @@
     var t = localStorage.getItem("akr-theme") || "system";
     var dark = t==="dark"||(t==="system"&&window.matchMedia("(prefers-color-scheme:dark)").matches);
     if(dark) document.documentElement.classList.add("dark");
+    if(localStorage.getItem("akr-accent")==="sky") document.documentElement.classList.add("accent-sky");
     window.matchMedia("(prefers-color-scheme:dark)").addEventListener("change",function(e){
       if(localStorage.getItem("akr-theme")==="system")
         document.documentElement.classList.toggle("dark",e.matches);
@@ -918,7 +930,7 @@ function App() {
         </div>
       </main>
 
-      <button onClick={openAdd} className="fixed right-5 bottom-24 w-14 h-14 rounded-full grid place-items-center active:scale-90 transition-transform duration-100" style={{background:"linear-gradient(135deg,#FF8FA3,#FF6B8A)",color:"white",boxShadow:"0 6px 24px rgba(255,107,138,0.5)"}} aria-label="新增記帳">
+      <button onClick={openAdd} className="fixed right-5 bottom-24 w-14 h-14 rounded-full grid place-items-center active:scale-90 transition-transform duration-100" style={{background:"linear-gradient(135deg,var(--brand-from),var(--brand-to))",color:"white",boxShadow:"0 6px 24px var(--brand-glow)"}} aria-label="新增記帳">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" width="28" height="28"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
       </button>
 
@@ -1758,6 +1770,14 @@ function OtherView() {
   };
   const themeOpts = [["light","光亮","☀️"],["dark","黑暗","🌙"],["system","跟隨系統","⚙️"]];
 
+  const [accent, setAccent] = useState(()=>localStorage.getItem("akr-accent")||"pink");
+  const applyAccent = (a) => {
+    document.documentElement.classList.toggle("accent-sky", a==="sky");
+    localStorage.setItem("akr-accent", a);
+    setAccent(a);
+  };
+  const accentOpts = [["pink","珊瑚粉","#FF6B8A","#FF8FA3"],["sky","天空藍","#0EA5E9","#38BDF8"]];
+
   const [notifyOn, setNotifyOn] = useState(()=>localStorage.getItem("akr-notify")==="1");
   const toggleNotify = async () => {
     if(!notifyOn) {
@@ -1788,6 +1808,21 @@ function OtherView() {
             className={`relative w-11 h-6 rounded-full transition-colors ${notifyOn?"bg-[color:var(--brand)]":"bg-gray-200"}`}>
             <span className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-all ${notifyOn?"left-5":"left-0.5"}`}/>
           </button>
+        </div>
+      </div>
+
+      {/* 主題色 */}
+      <div className="bg-white rounded-2xl shadow-sm p-4">
+        <div className="text-sm font-semibold text-gray-700 mb-3">主題色</div>
+        <div className="flex gap-2">
+          {accentOpts.map(([v,l,c1,c2])=>(
+            <button key={v} onClick={()=>applyAccent(v)}
+              className={`flex-1 flex flex-col items-center gap-2 py-3 rounded-xl text-xs font-medium border-2 transition-all
+                ${accent===v?"border-[color:var(--brand)] bg-[color:var(--brand-soft)] text-[color:var(--brand)]":"border-gray-100 text-gray-500"}`}>
+              <span className="w-7 h-7 rounded-full block shadow-sm" style={{background:`linear-gradient(135deg,${c2},${c1})`}}/>
+              {l}
+            </button>
+          ))}
         </div>
       </div>
 
@@ -2453,7 +2488,7 @@ function CalcPad({expr, onKey}) {
         <button onPointerDown={e=>{e.preventDefault();onKey("=");}}
           className={`${btnBase} h-14 bg-gray-200 text-gray-700`}>=</button>
         <button onPointerDown={e=>{e.preventDefault();onKey("✓");}}
-          className={`${btnBase} h-14 text-white`} style={{background:"linear-gradient(135deg,#FF8FA3,#FF6B8A)"}}>完成</button>
+          className={`${btnBase} h-14 text-white`} style={{background:"linear-gradient(135deg,var(--brand-from),var(--brand-to))"}}>完成</button>
       </div>
     </div>
   );
