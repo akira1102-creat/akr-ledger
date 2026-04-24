@@ -88,7 +88,7 @@
     var t = localStorage.getItem("akr-theme") || "system";
     var dark = t==="dark"||(t==="system"&&window.matchMedia("(prefers-color-scheme:dark)").matches);
     if(dark) document.documentElement.classList.add("dark");
-    if(localStorage.getItem("akr-accent")==="sky") document.documentElement.classList.add("accent-sky");
+    if((localStorage.getItem("akr-accent")||"sky")==="sky") document.documentElement.classList.add("accent-sky");
     window.matchMedia("(prefers-color-scheme:dark)").addEventListener("change",function(e){
       if(localStorage.getItem("akr-theme")==="system")
         document.documentElement.classList.toggle("dark",e.matches);
@@ -1770,7 +1770,7 @@ function OtherView() {
   };
   const themeOpts = [["light","淺色","☀️"],["dark","深色","🌙"],["system","跟隨系統","⚙️"]];
 
-  const [accent, setAccent] = useState(()=>localStorage.getItem("akr-accent")||"pink");
+  const [accent, setAccent] = useState(()=>localStorage.getItem("akr-accent")||"sky");
   const applyAccent = (a) => {
     document.documentElement.classList.toggle("accent-sky", a==="sky");
     localStorage.setItem("akr-accent", a);
