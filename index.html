@@ -1969,7 +1969,7 @@ function BasicSettings({store, setStore}) {
       CURRENCIES.forEach(c => {
         if (c.code === base) { newRates[c.code] = 1; return; }
         const r = data.rates[c.code];
-        if (r) newRates[c.code] = Math.round(r * 10000) / 10000;
+        if (r) newRates[c.code] = Math.round((1/r) * 10000) / 10000;
       });
       setStore(s=>({...s, settings:{...s.settings, rates:newRates}}));
       setRateMsg("✅ 匯率已更新（" + new Date().toLocaleTimeString("zh-HK") + "）");
@@ -2588,7 +2588,7 @@ function EntryModal({entry, store, base, rates, onSave, onDelete, onClose, close
         <button onClick={save} className="text-sm font-semibold" style={{color:"var(--brand)"}}>確定</button>
       </div>
 
-      <div ref={scrollRef} className="overflow-y-auto flex-1 min-h-0 no-scrollbar px-4 py-3 space-y-4">
+      <div ref={scrollRef} className="overflow-y-auto overflow-x-hidden flex-1 min-h-0 no-scrollbar px-4 py-3 space-y-4">
         {/* 收支切換 */}
         <div className="flex gap-2">
           {[["expense","支出","var(--expense)"],["income","收入","var(--income)"]].map(([t,l,c])=>(
@@ -2628,7 +2628,8 @@ function EntryModal({entry, store, base, rates, onSave, onDelete, onClose, close
             })}
           </div>
           <input type="date" value={date} onChange={e=>setDate(e.target.value)}
-            className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm"/>
+            className="w-full min-w-0 max-w-full border border-gray-200 rounded-xl px-4 py-3 text-sm"
+            style={{boxSizing:"border-box"}}/>
         </div>
 
         {/* 備注 */}
