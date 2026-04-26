@@ -1943,7 +1943,33 @@ function BasicSettings({store, setStore}) {
     if(key==="⌫"){ setRateCalc(rc=>({...rc, expr:rc.expr.slice(0,-1)})); return; }
     setRateCalc(rc=>({...rc, expr:rc.expr+key}));
   };
-  const setBase = (c) => setStore(s=>({...s, settings:{...s.settings, baseCurrency:c}}));
+  const setBase = (newBase) => {
+    if(newBase === base) return;
+    setStore(s => {
+      const r = s.settings.rates;
+      const factor = r[newBase] || 1; // 1 oldBase = factor newBase (via 1/rate)
+      // Convert budgets: oldBase amount → newBase amount = amount / factor
+      const newTotalBudget = s.totalBudget > 0 ? Math.round(s.totalBudget / factor * 100) / 100 : 0;
+      const newBudgets = {};
+      Object.entries(s.budgets || {}).forEach(([k,v]) => {
+        newBudgets[k] = Math.round(v / factor * 100) / 100;
+      });
+      // Recalculate rates relative to new base
+      const newRates = {};
+      Object.keys(r).forEach(code => {
+        if(code === newBase) { newRates[code] = 1; return; }
+        // r[code] = oldBase per 1 code; r[newBase] = oldBase per 1 newBase
+        // newRate[code] = newBase per 1 code = r[code] / r[newBase]
+        newRates[code] = Math.round(r[code] / factor * 10000) / 10000;
+      });
+      return {
+        ...s,
+        totalBudget: newTotalBudget,
+        budgets: newBudgets,
+        settings: { ...s.settings, baseCurrency: newBase, rates: newRates },
+      };
+    });
+  };
   const setRate = (c, newV) => {
     const v = parseFloat(newV);
     if(!v || v<=0) return;
