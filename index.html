@@ -2673,10 +2673,7 @@ function EntryModal({entry, store, base, rates, onSave, onDelete, onClose, close
             <div className="w-2/5 border-r border-gray-100 bg-gray-50 overflow-y-auto no-scrollbar">
               {parentCats.map(parent=>{
                 const children=cats.filter(c=>c.parentId===parent.id);
-                const isActive=catTab===parent.id;
-                const childSel=selectedCat?.parentId===parent.id;
-                const directSel=category===parent.id&&!selectedCat?.parentId;
-                const highlight=isActive||childSel||directSel;
+                const highlight=catTab===parent.id;
                 return (
                   <button key={parent.id} onClick={e=>{
                     e.stopPropagation();
