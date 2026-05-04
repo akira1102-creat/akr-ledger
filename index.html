@@ -1790,7 +1790,7 @@ function OtherView() {
     }
   };
   const aboutRows = [
-    ["版本","v1.0.260426",false],
+    ["版本","v1.0.260504",false],
     ["製作者","AKiRa",true],
     ["技術","React · Tailwind · PWA",false],
     ["支援幣種","MOP · HKD · CNY · JPY · TWD",false],
@@ -1922,27 +1922,22 @@ function BasicSettings({store, setStore}) {
   const rates = store.settings.rates;
   const [fetchingRates, setFetchingRates] = useState(false);
   const [rateMsg, setRateMsg] = useState("");
-  const [rateCalc, setRateCalc] = useState(null); // {code, expr}
+  const [convBase, setConvBase] = useState(base);
+  const [convAmount, setConvAmount] = useState("100");
+  useEffect(()=>{ setConvBase(base); }, [base]);
 
-  useEffect(()=>{
-    if(rateCalc) setLayer('calcPad', ()=>setRateCalc(null));
-    else clearLayer('calcPad');
-  }, [!!rateCalc]);
-
-  const openRateCalc = (code) => setRateCalc({code, expr: String(rates[code]||"")});
-  const handleRateKey = (key) => {
-    if(!rateCalc) return;
-    if(key==="✓"||key==="=") {
-      const r = evalExpr(rateCalc.expr);
-      if(r&&r>0) setRate(rateCalc.code, r);
-      if(key==="✓") setRateCalc(null);
-      else setRateCalc(rc=>({...rc, expr: r ? String(r) : rc.expr}));
-      return;
-    }
-    if(key==="AC"){ setRateCalc(rc=>({...rc, expr:""})); return; }
-    if(key==="⌫"){ setRateCalc(rc=>({...rc, expr:rc.expr.slice(0,-1)})); return; }
-    setRateCalc(rc=>({...rc, expr:rc.expr+key}));
+  const getConverted = (code) => {
+    const amt = parseFloat(convAmount);
+    if(!amt || isNaN(amt) || amt<=0) return "";
+    if(code===convBase) return convAmount;
+    const inBase = amt * (rates[convBase]||1);
+    const result = inBase / (rates[code]||1);
+    if(result>=1000) return result.toFixed(0);
+    if(result>=10)   return result.toFixed(1);
+    if(result>=1)    return result.toFixed(2);
+    return result.toFixed(4);
   };
+
   const setBase = (newBase) => {
     if(newBase === base) return;
     setStore(s => {
@@ -1970,24 +1965,10 @@ function BasicSettings({store, setStore}) {
       };
     });
   };
-  const setRate = (c, newV) => {
-    const v = parseFloat(newV);
-    if(!v || v<=0) return;
-    if(c === base) return; // 基準幣值固定為 1，不可修改
-    setStore(s=>({
-      ...s,
-      settings:{
-        ...s.settings,
-        rates:{ ...s.settings.rates, [c]: Math.round(v * 10000) / 10000 }
-      }
-    }));
-  };
-
   const fetchRates = async () => {
     setFetchingRates(true);
     setRateMsg("");
     try {
-      // Use exchangerate-api free endpoint (no key needed for basic pairs)
       const res = await fetch(`https://open.er-api.com/v6/latest/${base}`);
       if (!res.ok) throw new Error("網絡錯誤");
       const data = await res.json();
@@ -2007,7 +1988,6 @@ function BasicSettings({store, setStore}) {
     }
   };
   return (
-    <>
     <div className="space-y-3">
       <div className="bg-white rounded-2xl shadow-sm p-4">
         <div className="text-sm font-semibold mb-3">主要幣值</div>
@@ -2021,7 +2001,7 @@ function BasicSettings({store, setStore}) {
       </div>
       <div className="bg-white rounded-2xl shadow-sm p-4">
         <div className="flex items-center justify-between mb-3">
-          <div className="text-sm font-semibold">匯率設定（互相轉換）</div>
+          <div className="text-sm font-semibold">匯率換算</div>
           <button onClick={fetchRates} disabled={fetchingRates}
             className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-xl font-medium transition-all ${fetchingRates?"bg-gray-100 text-gray-400":"bg-[color:var(--brand-soft)] text-[color:var(--brand)] active:opacity-70"}`}>
             <span className={fetchingRates?"animate-spin":""}>{fetchingRates?"⟳":"🔄"}</span>
@@ -2031,38 +2011,27 @@ function BasicSettings({store, setStore}) {
         {rateMsg&&<div className="text-xs mb-3 px-1" style={{color:rateMsg.startsWith("✅")?"#2ECC71":"#E74C3C"}}>{rateMsg}</div>}
         <div className="space-y-2">
           {CURRENCIES.map(c=>{
-            const isBase = c.code === base;
-            const active = rateCalc?.code===c.code;
+            const isActive = convBase===c.code;
+            const displayVal = getConverted(c.code);
             return (
-              <div key={c.code} className={`flex items-center gap-3 rounded-xl px-2 py-1 ${isBase?"opacity-50":"cursor-pointer"} ${active?"ring-2 ring-[color:var(--brand)] bg-[color:var(--brand-soft)]":""}`}
-                onClick={()=>{ if(!isBase) openRateCalc(c.code); }}>
-                <span className={`text-sm w-10 ${isBase?"font-bold":"font-normal"}`} style={{color:isBase?"var(--brand)":"inherit"}}>{c.code}</span>
-                <div className="flex-1 border border-gray-200 rounded-xl px-3 py-2 text-sm text-right bg-white">
-                  {active ? (rateCalc.expr||<span className="text-gray-300">0</span>) : (rates[c.code]??"")}
-                </div>
-                <span className="text-xs text-gray-400 w-12 text-right">{isBase?"（主）":""}</span>
+              <div key={c.code} className={`flex items-center gap-3 rounded-xl px-3 py-2.5 border-2 transition-all ${isActive?"border-[color:var(--brand)] bg-[color:var(--brand-soft)]":"border-gray-100 bg-gray-50"}`}>
+                <span className={`text-sm font-bold w-10 flex-shrink-0 ${c.code===base?"text-[color:var(--brand)]":"text-gray-600"}`}>{c.code}</span>
+                <input type="number" inputMode="decimal"
+                  value={isActive ? convAmount : displayVal}
+                  onChange={e=>{setConvBase(c.code);setConvAmount(e.target.value);}}
+                  onFocus={()=>setConvBase(c.code)}
+                  className="flex-1 bg-transparent outline-none text-right text-sm font-medium text-gray-800 min-w-0"
+                  placeholder="0"/>
+                {c.code!==base&&(
+                  <span className="text-[10px] text-gray-400 flex-shrink-0 whitespace-nowrap">1 {c.code}={rates[c.code]} {base}</span>
+                )}
               </div>
             );
           })}
         </div>
-        <div className="text-[10px] text-gray-400 mt-2">點擊數值可編輯；修改任一項其他幣種按比例自動調整。資料來源：Open Exchange Rates</div>
+        <div className="text-[10px] text-gray-400 mt-2 px-1">輸入任一幣值即時換算 · 匯率僅可透過同步更新</div>
       </div>
     </div>
-    {rateCalc&&(
-      <div className="fixed inset-0 z-50" onClick={()=>setRateCalc(null)}>
-        <div className="absolute inset-x-0 bottom-0 bg-white shadow-2xl rounded-t-3xl" onClick={e=>e.stopPropagation()}>
-          <div className="px-4 pt-4 pb-1 flex items-center justify-between">
-            <span className="text-sm font-semibold text-gray-700">{rateCalc.code} 匯率</span>
-            <button onClick={()=>setRateCalc(null)} className="text-gray-400 text-lg">✕</button>
-          </div>
-          <div className="px-4 py-2 text-right text-3xl font-bold text-gray-800">
-            {rateCalc.expr||<span className="text-gray-300">0</span>}
-          </div>
-          <CalcPad expr={rateCalc.expr} onKey={handleRateKey}/>
-        </div>
-      </div>
-    )}
-    </>
   );
 }
 
