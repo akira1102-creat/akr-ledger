@@ -1973,13 +1973,14 @@ function BasicSettings({store, setStore}) {
   const setRate = (c, newV) => {
     const v = parseFloat(newV);
     if(!v || v<=0) return;
-    setStore(s=>{
-      const old = s.settings.rates; const oldV = old[c]||1; const factor = v/oldV;
-      const newRates = Object.fromEntries(Object.entries(old).map(([k,r])=>
-        [k, k===c ? v : Math.round(r*factor*10000)/10000]
-      ));
-      return {...s, settings:{...s.settings, rates:newRates}};
-    });
+    if(c === base) return; // 基準幣值固定為 1，不可修改
+    setStore(s=>({
+      ...s,
+      settings:{
+        ...s.settings,
+        rates:{ ...s.settings.rates, [c]: Math.round(v * 10000) / 10000 }
+      }
+    }));
   };
 
   const fetchRates = async () => {
@@ -2030,15 +2031,16 @@ function BasicSettings({store, setStore}) {
         {rateMsg&&<div className="text-xs mb-3 px-1" style={{color:rateMsg.startsWith("✅")?"#2ECC71":"#E74C3C"}}>{rateMsg}</div>}
         <div className="space-y-2">
           {CURRENCIES.map(c=>{
+            const isBase = c.code === base;
             const active = rateCalc?.code===c.code;
             return (
-              <div key={c.code} className={`flex items-center gap-3 rounded-xl px-2 py-1 cursor-pointer ${active?"ring-2 ring-[color:var(--brand)] bg-[color:var(--brand-soft)]":""}`}
-                onClick={()=>openRateCalc(c.code)}>
-                <span className={`text-sm w-10 ${c.code===base?"font-bold":"font-normal"}`} style={{color:c.code===base?"var(--brand)":"inherit"}}>{c.code}</span>
+              <div key={c.code} className={`flex items-center gap-3 rounded-xl px-2 py-1 ${isBase?"opacity-50":"cursor-pointer"} ${active?"ring-2 ring-[color:var(--brand)] bg-[color:var(--brand-soft)]":""}`}
+                onClick={()=>{ if(!isBase) openRateCalc(c.code); }}>
+                <span className={`text-sm w-10 ${isBase?"font-bold":"font-normal"}`} style={{color:isBase?"var(--brand)":"inherit"}}>{c.code}</span>
                 <div className="flex-1 border border-gray-200 rounded-xl px-3 py-2 text-sm text-right bg-white">
                   {active ? (rateCalc.expr||<span className="text-gray-300">0</span>) : (rates[c.code]??"")}
                 </div>
-                <span className="text-xs text-gray-400 w-12 text-right">{c.code===base?"（主）":""}</span>
+                <span className="text-xs text-gray-400 w-12 text-right">{isBase?"（主）":""}</span>
               </div>
             );
           })}
