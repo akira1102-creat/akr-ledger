@@ -1380,7 +1380,8 @@ function ChartView({store, rates, base, entries, allEntries, viewMonth, onEdit})
   const nd = store.settings?.noDecimals||false;
   const [period, setPeriod] = useState("month");
   const [selectedCatId, setSelectedCatId] = useState(null);
-  const closeCat = useCallback(()=>setSelectedCatId(null),[]);
+  const [selectedChildId, setSelectedChildId] = useState(null);
+  const closeCat = useCallback(()=>{ setSelectedCatId(null); setSelectedChildId(null); },[]);
 
   const now = new Date();
 
@@ -1443,14 +1444,37 @@ function ChartView({store, rates, base, entries, allEntries, viewMonth, onEdit})
 
   const pieData=parentExpCats.filter(c=>(expByCat[c.id]||0)>0).map(c=>({id:c.id,value:expByCat[c.id],cat:c})).sort((a,b)=>b.value-a.value);
 
+  const childExpData = useMemo(()=>{
+    if(!selectedCatId) return [];
+    const childMap={};
+    rangeEntries.filter(e=>e.type==="expense").forEach(e=>{
+      const cat=expCatMap[e.category];
+      if((cat?.parentId||e.category)===selectedCatId){
+        const cid=cat?.parentId?e.category:selectedCatId;
+        childMap[cid]=(childMap[cid]||0)+toBase(e.amount,e.currency,rates,base);
+      }
+    });
+    return store.categories.expense
+      .filter(c=>c.parentId===selectedCatId&&(childMap[c.id]||0)>0)
+      .map(c=>({id:c.id,value:childMap[c.id],cat:c}))
+      .sort((a,b)=>b.value-a.value);
+  },[selectedCatId,rangeEntries,expCatMap,rates,base,store.categories.expense]);
+
   const cardEntries = useMemo(()=>{
     if(!selectedCatId) return [];
     return rangeEntries.filter(e=>{
       if(e.type!=="expense") return false;
       const cat=expCatMap[e.category];
+      if(selectedChildId) return e.category===selectedChildId;
       return (cat?.parentId||e.category)===selectedCatId;
     }).sort((a,b)=>a.date<b.date?1:-1);
-  },[selectedCatId,rangeEntries,expCatMap]);
+  },[selectedCatId,selectedChildId,rangeEntries,expCatMap]);
+
+  useEffect(()=>{
+    if(selectedChildId) setLayer('chartPanel', ()=>setSelectedChildId(null));
+    else clearLayer('chartPanel');
+    return ()=>clearLayer('chartPanel');
+  },[selectedChildId]);
 
   useEffect(()=>{
     if(selectedCatId) setLayer('chartSub', closeCat);
@@ -1484,20 +1508,32 @@ function ChartView({store, rates, base, entries, allEntries, viewMonth, onEdit})
         {totalExp===0?(
           <div className="py-10 text-center text-gray-400 text-sm">本期暫無支出</div>
         ):(()=>{
-          const activeData=dedupeColors(pieData);
-          const handleSelect=id=>setSelectedCatId(id===selectedCatId?null:id);
+          const inSub=!!(selectedCatId&&childExpData.length>0);
+          const activeData=dedupeColors(inSub?childExpData:pieData);
+          const activeTotal=inSub?childExpData.reduce((s,d)=>s+d.value,0):totalExp;
+          const activeSelected=inSub?selectedChildId:selectedCatId;
+          const handleSelect=inSub
+            ?id=>setSelectedChildId(id===selectedChildId?null:id)
+            :id=>{ setSelectedCatId(id===selectedCatId?null:id); setSelectedChildId(null); };
           return (
             <div className="flex flex-col items-center">
-              <LargeDonut data={activeData} total={totalExp} base={base} onSelect={handleSelect} selectedId={selectedCatId} nd={nd}/>
+              {inSub&&(
+                <div className="w-full flex items-center gap-2 mb-3">
+                  <button onClick={closeCat}
+                    className="text-xs text-gray-400 px-2.5 py-1 bg-gray-100 rounded-lg active:bg-gray-200">← 返回</button>
+                  <span className="text-xs font-medium text-gray-600">{allCatMap[selectedCatId]?.icon} {allCatMap[selectedCatId]?.name} 細項</span>
+                </div>
+              )}
+              <LargeDonut data={activeData} total={activeTotal} base={base} onSelect={handleSelect} selectedId={activeSelected} nd={nd}/>
               <div className="w-full mt-4 space-y-2">
                 {activeData.map(d=>{
-                  const isActive=selectedCatId===d.id;
+                  const isActive=activeSelected===d.id;
                   return (
                     <button key={d.id} onClick={()=>handleSelect(d.id)}
                       className={`w-full flex items-center gap-2.5 px-2 py-1.5 rounded-xl transition-all ${isActive?"bg-gray-100":""}`}>
                       <div className="w-3 h-3 rounded-full flex-shrink-0" style={{background:d.cat.color}}/>
                       <span className="text-sm flex-1 text-left text-gray-700">{d.cat.icon} {d.cat.name}</span>
-                      <span className="text-xs text-gray-400 w-8 text-right">{Math.round(d.value/totalExp*100)}%</span>
+                      <span className="text-xs text-gray-400 w-8 text-right">{Math.round(d.value/activeTotal*100)}%</span>
                       <span className="text-sm amount-font text-gray-800 w-24 text-right">{fmt(d.value,base,nd)}</span>
                     </button>
                   );
@@ -1513,10 +1549,22 @@ function ChartView({store, rates, base, entries, allEntries, viewMonth, onEdit})
         {selectedCatId&&selectedCat ? (
           <>
             <div className="px-4 py-2.5 flex items-center gap-2">
-              <button onClick={closeCat} className="text-xs text-gray-400 px-2 py-0.5 bg-gray-100 rounded-lg active:bg-gray-200">← 返回</button>
-              <span className="w-6 h-6 rounded-full grid place-items-center text-sm flex-shrink-0" style={{background:selectedCat.color+"55"}}>{selectedCat.icon}</span>
-              <span className="text-sm font-semibold flex-1">{selectedCat.name}</span>
-              <span className="text-sm amount-font font-semibold" style={{color:"var(--expense)"}}>{fmt(expByCat[selectedCatId]||0,base,nd)}</span>
+              <button onClick={selectedChildId?()=>setSelectedChildId(null):closeCat} className="text-xs text-gray-400 px-2 py-0.5 bg-gray-100 rounded-lg active:bg-gray-200">← 返回</button>
+              {selectedChildId ? (
+                <>
+                  <span className="w-6 h-6 rounded-full grid place-items-center text-sm flex-shrink-0" style={{background:allCatMap[selectedChildId]?.color+"55"}}>{allCatMap[selectedChildId]?.icon}</span>
+                  <span className="text-xs text-gray-400 flex-shrink-0">{selectedCat.name} ›</span>
+                  <span className="text-sm font-semibold flex-1 truncate">{allCatMap[selectedChildId]?.name}</span>
+                </>
+              ) : (
+                <>
+                  <span className="w-6 h-6 rounded-full grid place-items-center text-sm flex-shrink-0" style={{background:selectedCat.color+"55"}}>{selectedCat.icon}</span>
+                  <span className="text-sm font-semibold flex-1">{selectedCat.name}</span>
+                </>
+              )}
+              <span className="text-sm amount-font font-semibold flex-shrink-0" style={{color:"var(--expense)"}}>
+                {fmt(cardEntries.reduce((s,e)=>s+toBase(e.amount,e.currency,rates,base),0),base,nd)}
+              </span>
             </div>
             {cardEntries.length===0?(
               <div className="px-4 py-6 text-center text-gray-400 text-sm">本期無此分類支出</div>
@@ -1730,7 +1778,7 @@ function OtherView({store, setStore}) {
     }
   };
   const aboutRows = [
-    ["版本","v1.0.260510",false],
+    ["版本","v1.0.260510b",false],
     ["製作者","AKiRa",true],
     ["技術","React · Tailwind · PWA",false],
     ["支援幣種","MOP · HKD · CNY · JPY · TWD",false],
