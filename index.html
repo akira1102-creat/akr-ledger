@@ -1380,20 +1380,7 @@ function ChartView({store, rates, base, entries, allEntries, viewMonth, onEdit})
   const nd = store.settings?.noDecimals||false;
   const [period, setPeriod] = useState("month");
   const [selectedCatId, setSelectedCatId] = useState(null);
-  const [selectedChildId, setSelectedChildId] = useState(null);
-  const [panelClosing, setPanelClosing] = useState(false);
-  const [drillDir, setDrillDir] = useState(0);
-  const selectedChildIdRef = useRef(selectedChildId);
-  useEffect(()=>{ selectedChildIdRef.current=selectedChildId; },[selectedChildId]);
-
-  const closePanel = useCallback(()=>{
-    setPanelClosing(true);
-    setTimeout(()=>{
-      setPanelClosing(false);
-      if(selectedChildIdRef.current){ setSelectedChildId(null); }
-      else{ setSelectedCatId(null); setSelectedChildId(null); }
-    },230);
-  },[]);
+  const closeCat = useCallback(()=>setSelectedCatId(null),[]);
 
   const now = new Date();
 
@@ -1456,50 +1443,22 @@ function ChartView({store, rates, base, entries, allEntries, viewMonth, onEdit})
 
   const pieData=parentExpCats.filter(c=>(expByCat[c.id]||0)>0).map(c=>({id:c.id,value:expByCat[c.id],cat:c})).sort((a,b)=>b.value-a.value);
 
-  const childExpData=useMemo(()=>{
+  const cardEntries = useMemo(()=>{
     if(!selectedCatId) return [];
-    const childMap={};
-    rangeEntries.filter(e=>e.type==="expense").forEach(e=>{
-      const cat=expCatMap[e.category];
-      if((cat?.parentId||e.category)===selectedCatId){
-        const cid=cat?.parentId?e.category:selectedCatId;
-        childMap[cid]=(childMap[cid]||0)+toBase(e.amount,e.currency,rates,base);
-      }
-    });
-    return store.categories.expense
-      .filter(c=>c.parentId===selectedCatId&&(childMap[c.id]||0)>0)
-      .map(c=>({id:c.id,value:childMap[c.id],cat:c}))
-      .sort((a,b)=>b.value-a.value);
-  },[selectedCatId,rangeEntries,expCatMap,rates,base,store.categories.expense]);
-
-  const panelVisible = useMemo(()=>
-    !!(selectedChildId||(childExpData.length===0&&selectedCatId))&&!panelClosing,
-    [selectedChildId,selectedCatId,panelClosing]
-  );
-
-  useEffect(()=>{
-    if(panelVisible) setLayer('chartPanel', closePanel);
-    else clearLayer('chartPanel');
-  },[panelVisible,closePanel]);
-
-  useEffect(()=>{
-    const inSubNow=!!(selectedCatId&&childExpData.length>0)&&!panelVisible;
-    if(inSubNow) setLayer('chartSub', ()=>{setDrillDir(-1);setSelectedCatId(null);setSelectedChildId(null);});
-    else clearLayer('chartSub');
-  },[!!selectedCatId,childExpData.length,panelVisible]);
-
-  const filteredEntries=useMemo(()=>{
-    const filterCatId=selectedChildId||(childExpData.length===0?selectedCatId:null);
-    if(!filterCatId) return [];
     return rangeEntries.filter(e=>{
       if(e.type!=="expense") return false;
       const cat=expCatMap[e.category];
-      if(selectedChildId) return e.category===selectedChildId;
-      return (cat?.parentId||e.category)===filterCatId;
+      return (cat?.parentId||e.category)===selectedCatId;
     }).sort((a,b)=>a.date<b.date?1:-1);
-  },[selectedChildId,selectedCatId,childExpData,rangeEntries,expCatMap]);
+  },[selectedCatId,rangeEntries,expCatMap]);
 
-  const selectedCat=selectedCatId?expCatMap[selectedCatId]:null;
+  useEffect(()=>{
+    if(selectedCatId) setLayer('chartSub', closeCat);
+    else clearLayer('chartSub');
+    return ()=>clearLayer('chartSub');
+  },[selectedCatId,closeCat]);
+
+  const selectedCat = selectedCatId ? expCatMap[selectedCatId] : null;
   const totalBudget=store.totalBudget||0;
   const budgetRows=period==="month"
     ?parentExpCats.filter(c=>(store.budgets[c.id]||0)>0).map(c=>({id:c.id,limit:store.budgets[c.id],used:expByCat[c.id]||0,cat:c}))
@@ -1525,35 +1484,20 @@ function ChartView({store, rates, base, entries, allEntries, viewMonth, onEdit})
         {totalExp===0?(
           <div className="py-10 text-center text-gray-400 text-sm">本期暫無支出</div>
         ):(()=>{
-          const inSub=!!(selectedCatId&&childExpData.length>0);
-          const activeData=dedupeColors(inSub?childExpData:pieData);
-          const activeTotal=inSub?childExpData.reduce((s,d)=>s+d.value,0):totalExp;
-          const activeSelected=inSub?selectedChildId:selectedCatId;
-          const handleSelect=inSub
-            ?id=>{setSelectedChildId(id===selectedChildId?null:id);}
-            :id=>{
-              if(id===selectedCatId){setSelectedCatId(null);setSelectedChildId(null);setDrillDir(0);}
-              else{setDrillDir(1);setSelectedCatId(id);setSelectedChildId(null);}
-            };
+          const activeData=dedupeColors(pieData);
+          const handleSelect=id=>setSelectedCatId(id===selectedCatId?null:id);
           return (
-            <div key={inSub?"sub":"parent"} className={`flex flex-col items-center ${drillDir>0?"tab-slide-right":drillDir<0?"tab-slide-left":""}`}>
-              {inSub&&(
-                <div className="w-full flex items-center gap-2 mb-3">
-                  <button onClick={()=>{setDrillDir(-1);setSelectedCatId(null);setSelectedChildId(null);}}
-                    className="text-xs text-gray-400 px-2.5 py-1 bg-gray-100 rounded-lg active:bg-gray-200">← 返回</button>
-                  <span className="text-xs font-medium text-gray-600">{allCatMap[selectedCatId]?.icon} {allCatMap[selectedCatId]?.name} 細項</span>
-                </div>
-              )}
-              <LargeDonut data={activeData} total={activeTotal} base={base} onSelect={handleSelect} selectedId={activeSelected} nd={nd}/>
+            <div className="flex flex-col items-center">
+              <LargeDonut data={activeData} total={totalExp} base={base} onSelect={handleSelect} selectedId={selectedCatId} nd={nd}/>
               <div className="w-full mt-4 space-y-2">
                 {activeData.map(d=>{
-                  const isActive=activeSelected===d.id;
+                  const isActive=selectedCatId===d.id;
                   return (
                     <button key={d.id} onClick={()=>handleSelect(d.id)}
                       className={`w-full flex items-center gap-2.5 px-2 py-1.5 rounded-xl transition-all ${isActive?"bg-gray-100":""}`}>
                       <div className="w-3 h-3 rounded-full flex-shrink-0" style={{background:d.cat.color}}/>
                       <span className="text-sm flex-1 text-left text-gray-700">{d.cat.icon} {d.cat.name}</span>
-                      <span className="text-xs text-gray-400 w-8 text-right">{Math.round(d.value/activeTotal*100)}%</span>
+                      <span className="text-xs text-gray-400 w-8 text-right">{Math.round(d.value/totalExp*100)}%</span>
                       <span className="text-sm amount-font text-gray-800 w-24 text-right">{fmt(d.value,base,nd)}</span>
                     </button>
                   );
@@ -1566,47 +1510,79 @@ function ChartView({store, rates, base, entries, allEntries, viewMonth, onEdit})
 
       {/* 收支總覽 + 分類列表 */}
       <div className="bg-white rounded-2xl shadow-sm divide-y divide-gray-50">
-        {totalExp>0&&<>
-          <div className="px-4 py-2.5 flex justify-between text-sm font-semibold">
-            <span>支出</span><span className="amount-font text-[color:var(--expense)]">{fmt(totalExp,base,nd)}</span>
-          </div>
-          {parentExpCats.filter(c=>(expByCat[c.id]||0)>0).map(c=>{
-            const curr=expByCat[c.id]||0, prev=prevExpByCat[c.id]||0;
-            const trendPct=prev>0?Math.round((curr-prev)/prev*100):null;
-            return (
-              <button key={c.id} className="w-full px-4 py-3 flex items-center gap-3 active:bg-gray-50"
-                onClick={()=>setSelectedCatId(c.id===selectedCatId?null:c.id)}>
-                <div className="w-9 h-9 rounded-full grid place-items-center flex-shrink-0 text-lg" style={{background:c.color+"44"}}>{c.icon}</div>
-                <div className="flex-1 text-left">
-                  <div className={`text-sm ${c.id===selectedCatId?"font-semibold text-[color:var(--brand)]":""}`}>{c.name}</div>
-                  <div className="h-1 bg-gray-100 rounded-full mt-1 overflow-hidden">
-                    <div className="h-full rounded-full" style={{width:Math.round(curr/totalExp*100)+"%",background:c.color}}></div>
-                  </div>
-                </div>
-                <div className="text-right flex-shrink-0">
-                  <div className="text-sm amount-font text-gray-700">{fmt(curr,base,nd)}</div>
-                </div>
-              </button>
-            );
-          })}
-        </>}
-        {totalInc>0&&<>
-          <div className="px-4 py-2.5 flex justify-between text-sm font-semibold">
-            <span>收入</span><span className="amount-font text-[color:var(--income)]">{fmt(totalInc,base,nd)}</span>
-          </div>
-          {parentIncCats.filter(c=>(incByCat[c.id]||0)>0).map(c=>(
-            <div key={c.id} className="px-4 py-3 flex items-center gap-3">
-              <div className="w-9 h-9 rounded-full grid place-items-center flex-shrink-0 text-lg" style={{background:c.color+"44"}}>{c.icon}</div>
-              <div className="flex-1 text-left">
-                <div className="text-sm">{c.name}</div>
-                <div className="h-1 bg-gray-100 rounded-full mt-1 overflow-hidden">
-                  <div className="h-full rounded-full" style={{width:Math.round((incByCat[c.id]||0)/totalInc*100)+"%",background:c.color}}></div>
-                </div>
-              </div>
-              <span className="text-sm amount-font text-gray-700">{fmt(incByCat[c.id]||0,base,nd)}</span>
+        {selectedCatId&&selectedCat ? (
+          <>
+            <div className="px-4 py-2.5 flex items-center gap-2">
+              <button onClick={closeCat} className="text-xs text-gray-400 px-2 py-0.5 bg-gray-100 rounded-lg active:bg-gray-200">← 返回</button>
+              <span className="w-6 h-6 rounded-full grid place-items-center text-sm flex-shrink-0" style={{background:selectedCat.color+"55"}}>{selectedCat.icon}</span>
+              <span className="text-sm font-semibold flex-1">{selectedCat.name}</span>
+              <span className="text-sm amount-font font-semibold" style={{color:"var(--expense)"}}>{fmt(expByCat[selectedCatId]||0,base,nd)}</span>
             </div>
-          ))}
-        </>}
+            {cardEntries.length===0?(
+              <div className="px-4 py-6 text-center text-gray-400 text-sm">本期無此分類支出</div>
+            ):(
+              <ul>
+                {cardEntries.map(e=>{
+                  const cat=allCatMap[e.category]||{icon:"❓",name:"未分類",color:"#ddd"};
+                  return (
+                    <li key={e.id} className="px-4 py-3 flex items-center gap-3 border-t border-gray-50 active:bg-gray-50 cursor-pointer"
+                      onClick={()=>onEdit&&onEdit(e)}>
+                      <div className="w-9 h-9 rounded-full grid place-items-center text-base flex-shrink-0" style={{background:cat.color+"55"}}>{cat.icon}</div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-medium truncate">{cat.name}{e.memo?` · ${e.memo}`:""}</div>
+                        <div className="text-[11px] text-gray-400">{e.date}</div>
+                      </div>
+                      <div className="text-sm font-semibold amount-font text-[color:var(--expense)]">-{fmt(e.amount,e.currency,nd)}</div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </>
+        ) : (
+          <>
+            {totalExp>0&&<>
+              <div className="px-4 py-2.5 flex justify-between text-sm font-semibold">
+                <span>支出</span><span className="amount-font text-[color:var(--expense)]">{fmt(totalExp,base,nd)}</span>
+              </div>
+              {parentExpCats.filter(c=>(expByCat[c.id]||0)>0).map(c=>{
+                const curr=expByCat[c.id]||0;
+                return (
+                  <button key={c.id} className="w-full px-4 py-3 flex items-center gap-3 active:bg-gray-50"
+                    onClick={()=>setSelectedCatId(c.id)}>
+                    <div className="w-9 h-9 rounded-full grid place-items-center flex-shrink-0 text-lg" style={{background:c.color+"44"}}>{c.icon}</div>
+                    <div className="flex-1 text-left">
+                      <div className="text-sm">{c.name}</div>
+                      <div className="h-1 bg-gray-100 rounded-full mt-1 overflow-hidden">
+                        <div className="h-full rounded-full" style={{width:Math.round(curr/totalExp*100)+"%",background:c.color}}></div>
+                      </div>
+                    </div>
+                    <div className="text-right flex-shrink-0">
+                      <div className="text-sm amount-font text-gray-700">{fmt(curr,base,nd)}</div>
+                    </div>
+                  </button>
+                );
+              })}
+            </>}
+            {totalInc>0&&<>
+              <div className="px-4 py-2.5 flex justify-between text-sm font-semibold">
+                <span>收入</span><span className="amount-font text-[color:var(--income)]">{fmt(totalInc,base,nd)}</span>
+              </div>
+              {parentIncCats.filter(c=>(incByCat[c.id]||0)>0).map(c=>(
+                <div key={c.id} className="px-4 py-3 flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-full grid place-items-center flex-shrink-0 text-lg" style={{background:c.color+"44"}}>{c.icon}</div>
+                  <div className="flex-1 text-left">
+                    <div className="text-sm">{c.name}</div>
+                    <div className="h-1 bg-gray-100 rounded-full mt-1 overflow-hidden">
+                      <div className="h-full rounded-full" style={{width:Math.round((incByCat[c.id]||0)/totalInc*100)+"%",background:c.color}}></div>
+                    </div>
+                  </div>
+                  <span className="text-sm amount-font text-gray-700">{fmt(incByCat[c.id]||0,base,nd)}</span>
+                </div>
+              ))}
+            </>}
+          </>
+        )}
       </div>
 
       {/* 預算（月份模式）*/}
@@ -1644,48 +1620,6 @@ function ChartView({store, rates, base, entries, allEntries, viewMonth, onEdit})
       )}
     </div>
 
-    {/* 分類明細 overlay */}
-    {(()=>{
-      const panelCatId=selectedChildId||(childExpData.length===0?selectedCatId:null);
-      const panelCat=panelCatId?allCatMap[panelCatId]:null;
-      if(!panelCat&&!panelClosing) return null;
-      return (
-        <div className={`fixed inset-0 z-30 bg-black/30 flex items-end ${panelClosing?"fade-out":"fade-in"}`} onClick={closePanel}>
-          <div className={`bg-white w-full rounded-t-3xl max-h-[75vh] flex flex-col ${panelClosing?"sheet-exit":"sheet"}`} onClick={e=>e.stopPropagation()}>
-            <div className="px-4 py-3 flex items-center justify-between border-b border-gray-100 flex-shrink-0">
-              <div className="flex items-center gap-2">
-                <span className="w-8 h-8 rounded-full grid place-items-center text-base" style={{background:panelCat.color+"55"}}>{panelCat.icon}</span>
-                <span className="font-semibold text-sm">{panelCat.name}</span>
-                <span className="text-xs text-gray-400 ml-1">{filteredEntries.length} 筆</span>
-              </div>
-              <button onClick={closePanel} className="text-gray-400 text-lg">✕</button>
-            </div>
-            <div className="overflow-y-auto flex-1 no-scrollbar">
-              {filteredEntries.length===0?(
-                <div className="py-10 text-center text-gray-400 text-sm">本期無此分類支出</div>
-              ):(
-                <ul>
-                  {filteredEntries.map(e=>{
-                    const cat=allCatMap[e.category]||{icon:"❓",name:"未分類",color:"#ddd"};
-                    return (
-                      <li key={e.id} className="px-4 py-3 flex items-center gap-3 border-b border-gray-50 active:bg-gray-50 cursor-pointer"
-                        onClick={()=>onEdit&&onEdit(e)}>
-                        <div className="w-9 h-9 rounded-full grid place-items-center text-base flex-shrink-0" style={{background:cat.color+"55"}}>{cat.icon}</div>
-                        <div className="flex-1 min-w-0">
-                          <div className="text-sm font-medium truncate">{cat.name}{e.memo?` · ${e.memo}`:""}</div>
-                          <div className="text-[11px] text-gray-400">{e.date}</div>
-                        </div>
-                        <div className="text-sm font-semibold amount-font text-[color:var(--expense)]">-{fmt(e.amount,e.currency,nd)}</div>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-            </div>
-          </div>
-        </div>
-      );
-    })()}
     </React.Fragment>
   );
 }
@@ -1796,7 +1730,7 @@ function OtherView({store, setStore}) {
     }
   };
   const aboutRows = [
-    ["版本","v1.0.260504",false],
+    ["版本","v1.0.260510",false],
     ["製作者","AKiRa",true],
     ["技術","React · Tailwind · PWA",false],
     ["支援幣種","MOP · HKD · CNY · JPY · TWD",false],
