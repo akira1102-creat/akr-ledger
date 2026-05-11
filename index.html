@@ -452,6 +452,20 @@ const defaultStore = () => ({
   settings: { baseCurrency:"MOP", rates: DEFAULT_RATES },
 });
 // Ensure all required fields exist (used after load or cloud import)
+const DEFAULT_LAYOUT = {
+  home: [
+    {id:"monthly_summary",visible:true},
+    {id:"expense_overview",visible:true},
+    {id:"entry_list",visible:true},
+  ],
+  cal: [{id:"day_entries",visible:true}],
+  chart: [
+    {id:"trend",visible:true},
+    {id:"donut",visible:true},
+    {id:"breakdown",visible:true},
+    {id:"budget",visible:true},
+  ],
+};
 const normalizeStore = (s) => {
   if (!s.totalBudget) s.totalBudget = 0;
   if (!s.budgets) s.budgets = {};
@@ -461,6 +475,16 @@ const normalizeStore = (s) => {
   if (!s.categories?.expense) s.categories = defaultStore().categories;
   if (!s.settings) s.settings = defaultStore().settings;
   if (s.settings.noDecimals == null) s.settings.noDecimals = false;
+  if (!s.layout) {
+    s.layout = JSON.parse(JSON.stringify(DEFAULT_LAYOUT));
+  } else {
+    Object.keys(DEFAULT_LAYOUT).forEach(tab => {
+      if (!s.layout[tab]) s.layout[tab] = JSON.parse(JSON.stringify(DEFAULT_LAYOUT[tab]));
+      else DEFAULT_LAYOUT[tab].forEach(def => {
+        if (!s.layout[tab].find(item => item.id === def.id)) s.layout[tab].push({...def});
+      });
+    });
+  }
   return s;
 };
 const dateToMs = s => s ? new Date(s).getTime() : 0;
@@ -1158,10 +1182,10 @@ function HomeView({store, rates, base, entries, onEdit, onDelete, onCopy, monthT
 
   const [ym1,ym2] = viewMonth.split("-");
 
-  return (
-    <div className="px-3 pt-3 space-y-3">
-      {/* 本月收支 + mini donut */}
-      <div className="bg-white rounded-2xl shadow-sm p-4">
+  const homeLayout = store.layout?.home || DEFAULT_LAYOUT.home;
+  const renderHomeSection = (id) => {
+    if (id==="monthly_summary") return (
+      <div key="monthly_summary" className="bg-white rounded-2xl shadow-sm p-4">
         <div className="text-sm font-semibold mb-3">{ym1} 年 {ym2} 月 收支</div>
         <div className="flex items-center gap-3">
           <div className="flex-1 space-y-2 min-w-0">
@@ -1242,8 +1266,9 @@ function HomeView({store, rates, base, entries, onEdit, onDelete, onCopy, monthT
         )}
       </div>
 
-      {/* 支出概況卡片 */}
-      <div className="bg-white rounded-2xl shadow-sm p-4">
+    );
+    if (id==="expense_overview") return (
+      <div key="expense_overview" className="bg-white rounded-2xl shadow-sm p-4">
         <div className="text-sm font-semibold mb-3">支出概況</div>
         {[
           {label:"本月", exp:monthExp, budget:tb,          sub:tb>0?`共 ${daysInMonth} 日`:null,                                         net:monthTotals.net},
@@ -1281,7 +1306,9 @@ function HomeView({store, rates, base, entries, onEdit, onDelete, onCopy, monthT
         {tb===0&&<div className="mt-1 text-[11px] text-gray-400 text-center">設定總預算後可顯示剩餘可用金額</div>}
       </div>
 
-      {/* 搜尋 + 記帳明細 */}
+    );
+    if (id==="entry_list") return (
+      <React.Fragment key="entry_list">
       <div className="flex items-center gap-2 px-1">
         <div className="flex-1 flex items-center gap-2 bg-white rounded-xl shadow-sm px-3 py-2">
           <span className="text-gray-400 text-sm">🔍</span>
@@ -1353,6 +1380,14 @@ function HomeView({store, rates, base, entries, onEdit, onDelete, onCopy, monthT
           )}
         </>
       )}
+      </React.Fragment>
+    );
+    return null;
+  };
+
+  return (
+    <div className="px-3 pt-3 space-y-3">
+      {homeLayout.filter(item=>item.visible).map(item=>renderHomeSection(item.id))}
     </div>
   );
 }
@@ -1422,7 +1457,7 @@ function CalendarView({store, rates, base, viewMonth, entries, onEdit}) {
         </div>
       </div>
 
-      {selectedDay&&(
+      {selectedDay&&(store.layout?.cal??DEFAULT_LAYOUT.cal).find(i=>i.id==="day_entries")?.visible!==false&&(
         <div className="mt-3 bg-white rounded-2xl shadow-sm overflow-hidden">
           <div className="px-4 py-2 text-sm font-semibold" style={{background:"var(--brand-soft)"}}>
             {y}/{pad2(m)}/{pad2(selectedDay)} 明細
@@ -1609,26 +1644,14 @@ function ChartView({store, rates, base, entries, allEntries, viewMonth, onEdit})
     ?parentExpCats.filter(c=>(store.budgets[c.id]||0)>0).map(c=>({id:c.id,limit:store.budgets[c.id],used:expByCat[c.id]||0,cat:c}))
     :[];
 
-  return (
-    <React.Fragment>
-    <div className="px-3 pt-3 space-y-3 pb-4">
-      {/* 週/月/年 切換 */}
-      <div className="flex items-center justify-between">
-        <div className="text-sm text-gray-500 font-medium">{rangeLabel}</div>
-        <div className="bg-white rounded-xl shadow-sm p-0.5 flex text-xs">
-          {[["week","本週"],["month","本月"],["year","本年"]].map(([k,l])=>(
-            <button key={k} onClick={()=>{setPeriod(k);setSelectedCatId(null);}}
-              className={`px-3 py-1.5 rounded-lg ${period===k?"text-white font-semibold":"text-gray-500"}`}
-              style={{background:period===k?"var(--brand)":"transparent"}}>{l}</button>
-          ))}
-        </div>
-      </div>
+  const chartLayout = store.layout?.chart || DEFAULT_LAYOUT.chart;
+  const renderChartSection = (id) => {
+    if (id==="trend") return period==="month"
+      ? <TrendChart key="trend" allEntries={allEntries||[]} base={base} rates={rates} nd={nd}/>
+      : null;
 
-      {/* 近6個月趨勢（月份模式才顯示） */}
-      {period==="month"&&<TrendChart allEntries={allEntries||[]} base={base} rates={rates} nd={nd}/>}
-
-      {/* 大圓餅 */}
-      <div className="bg-white rounded-2xl shadow-sm p-4">
+    if (id==="donut") return (
+      <div key="donut" className="bg-white rounded-2xl shadow-sm p-4">
         {totalExp===0?(
           <div className="py-10 text-center text-gray-400 text-sm">本期暫無支出</div>
         ):(()=>{
@@ -1668,8 +1691,9 @@ function ChartView({store, rates, base, entries, allEntries, viewMonth, onEdit})
         })()}
       </div>
 
-      {/* 收支總覽 + 分類列表 */}
-      <div className="bg-white rounded-2xl shadow-sm divide-y divide-gray-50">
+    );
+    if (id==="breakdown") return (
+      <div key="breakdown" className="bg-white rounded-2xl shadow-sm divide-y divide-gray-50">
         {selectedCatId&&selectedCat ? (
           <>
             <div className="px-4 py-2.5 flex items-center gap-2">
@@ -1757,9 +1781,9 @@ function ChartView({store, rates, base, entries, allEntries, viewMonth, onEdit})
         )}
       </div>
 
-      {/* 預算（月份模式）*/}
-      {period==="month"&&(budgetRows.length>0||totalBudget>0)&&(
-        <div className="bg-white rounded-2xl shadow-sm p-4">
+    );
+    if (id==="budget") return period==="month"&&(budgetRows.length>0||totalBudget>0) ? (
+      <div key="budget" className="bg-white rounded-2xl shadow-sm p-4">
           <div className="text-sm font-semibold mb-3">預算進度</div>
           {totalBudget>0&&(
             <div className="mb-3 pb-3 border-b border-gray-100">
@@ -1789,9 +1813,25 @@ function ChartView({store, rates, base, entries, allEntries, viewMonth, onEdit})
             })}
           </div>
         </div>
-      )}
-    </div>
+    ) : null;
+    return null;
+  };
 
+  return (
+    <React.Fragment>
+    <div className="px-3 pt-3 space-y-3 pb-4">
+      <div className="flex items-center justify-between">
+        <div className="text-sm text-gray-500 font-medium">{rangeLabel}</div>
+        <div className="bg-white rounded-xl shadow-sm p-0.5 flex text-xs">
+          {[["week","本週"],["month","本月"],["year","本年"]].map(([k,l])=>(
+            <button key={k} onClick={()=>{setPeriod(k);setSelectedCatId(null);}}
+              className={`px-3 py-1.5 rounded-lg ${period===k?"text-white font-semibold":"text-gray-500"}`}
+              style={{background:period===k?"var(--brand)":"transparent"}}>{l}</button>
+          ))}
+        </div>
+      </div>
+      {chartLayout.filter(item=>item.visible).map(item=>renderChartSection(item.id))}
+    </div>
     </React.Fragment>
   );
 }
@@ -1872,6 +1912,48 @@ function LargeDonut({data, total, base, onSelect, selectedId, nd=false}) {
 
 
 /* ===================== 設定頁 ===================== */
+const LAYOUT_LABELS = {
+  home:  {monthly_summary:"本月收支", expense_overview:"支出概況", entry_list:"記帳明細"},
+  cal:   {day_entries:"當日明細"},
+  chart: {trend:"近6個月趨勢", donut:"圓餅圖", breakdown:"收支分類", budget:"預算進度"},
+};
+function LayoutSettings({store, setStore}) {
+  const [tab, setTab] = useState("home");
+  const layout = store.layout;
+  const toggleVisible = (t, id) => setStore(s=>({...s, layout:{...s.layout, [t]:s.layout[t].map(item=>item.id===id?{...item,visible:!item.visible}:item)}, _lastModified:new Date().toISOString()}));
+  const reorder = (t, from, to) => setStore(s=>{
+    const items=[...s.layout[t]]; const [m]=items.splice(from,1); items.splice(to,0,m);
+    return {...s, layout:{...s.layout,[t]:items}, _lastModified:new Date().toISOString()};
+  });
+  return (
+    <div className="space-y-3">
+      <div className="bg-white rounded-2xl shadow-sm p-1 flex gap-1">
+        {[["home","首頁"],["cal","月曆"],["chart","圖表"]].map(([t,l])=>(
+          <button key={t} onClick={()=>setTab(t)}
+            className={`flex-1 py-1.5 rounded-xl text-sm ${tab===t?"bg-[color:var(--brand-soft)] text-[color:var(--brand)] font-semibold":"bg-gray-100 text-gray-500"}`}>{l}</button>
+        ))}
+      </div>
+      <div className="text-[11px] text-gray-400 px-1">長按 ☰ 拖拉排序；右側開關控制顯示</div>
+      <SortableList
+        items={layout[tab]}
+        itemHeight={56}
+        onReorder={(from,to)=>reorder(tab,from,to)}
+        renderItem={(item,_i,drag)=>(
+          <div className={`bg-white rounded-2xl shadow-sm px-3 py-3 flex items-center gap-3 mb-2 ${drag.isDragging?"ring-2 ring-[color:var(--brand)]":""}`}>
+            <div onPointerDown={drag.handlePointerDown} onPointerMove={drag.handlePointerMove} onPointerUp={drag.handlePointerUp}
+              className="text-gray-300 text-lg px-1 cursor-grab active:cursor-grabbing select-none flex-shrink-0" style={{touchAction:"none"}}>☰</div>
+            <span className="flex-1 text-sm font-medium text-gray-700">{LAYOUT_LABELS[tab][item.id]}</span>
+            <button onClick={()=>toggleVisible(tab,item.id)}
+              className={`relative w-11 h-6 rounded-full transition-colors flex-shrink-0 ${item.visible?"bg-[color:var(--brand)]":"bg-gray-200"}`}>
+              <span className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-all ${item.visible?"left-5":"left-0.5"}`}/>
+            </button>
+          </div>
+        )}
+      />
+    </div>
+  );
+}
+
 function OtherView({store, setStore}) {
   const [theme, setTheme] = useState(()=>localStorage.getItem("akr-theme")||"system");
   const applyTheme = (t) => {
@@ -1902,7 +1984,7 @@ function OtherView({store, setStore}) {
     }
   };
   const aboutRows = [
-    ["版本","v1.1.260511",false],
+    ["版本","v1.1.260512",false],
     ["製作者","AKiRa",true],
     ["技術","React · Tailwind · PWA",false],
     ["支援幣種","MOP · HKD · CNY · JPY · TWD",false],
@@ -2002,6 +2084,7 @@ function SettingsView({store, setStore, drive}) {
     return ()=>clearLayer('settingsTab');
   },[tab]);
   const menu = [
+    {key:"layout",icon:"📐", label:"頁面佈局",   desc:"調整首頁、月曆、圖表的卡片順序及顯示", bg:"#F0F4FF"},
     {key:"cat",   icon:"🏷️", label:"分類管理",   desc:"新增、編輯、排序收支分類",     bg:"#FFF0F3"},
     {key:"budget",icon:"💰", label:"預算設定",   desc:"設定月度總預算及各分類上限",   bg:"#F0FFF4"},
     {key:"data",  icon:"📁", label:"數據與同步", desc:"備份、匯入匯出、雲端同步",     bg:"#EFF6FF"},
@@ -2036,6 +2119,7 @@ function SettingsView({store, setStore, drive}) {
         設定
       </button>
       <div className="tab-slide-right">
+        {tab==="layout" && <LayoutSettings store={store} setStore={setStore}/>}
         {tab==="cat"    && <CatSettings store={store} setStore={setStore}/>}
         {tab==="budget" && <BudgetSettings store={store} setStore={setStore}/>}
         {tab==="data"   && <DataSettings store={store} setStore={setStore} drive={drive}/>}
