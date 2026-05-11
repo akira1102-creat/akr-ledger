@@ -123,17 +123,22 @@ function useGistSync(store, setStore) {
   const [gistToken, setGistToken] = useState(saved?.token  || null);
   const [gistId,    setGistId]    = useState(saved?.gistId || null);
   const [gistUser,  setGistUser]  = useState(saved?.user   || null);
-  const [lastSync,  setLastSync]  = useState(saved?.lastSync ? new Date(saved.lastSync) : null);
+  const [lastSync,   setLastSync]   = useState(saved?.lastSync   ? new Date(saved.lastSync)   : null);
+  const [lastUpload, setLastUpload] = useState(saved?.lastUpload ? new Date(saved.lastUpload) : null);
+  const [startupDone, setStartupDone] = useState(false);
   const [syncing,   setSyncing]   = useState(false);
   const [syncError, setSyncError] = useState(null);
 
   const storeRef = useRef(store);
   useEffect(() => { storeRef.current = store; }, [store]);
 
-  const persistState = (tok, id, user, sync) => {
+  // upload arg: pass the new upload Date when we actually uploaded, omit to preserve current lastUpload
+  const persistState = (tok, id, user, sync, upload) => {
     try {
       localStorage.setItem(GIST_STATE_KEY, JSON.stringify({
-        token: tok, gistId: id, user, lastSync: sync ? sync.toISOString() : null
+        token: tok, gistId: id, user,
+        lastSync:   sync   ? sync.toISOString()   : null,
+        lastUpload: upload !== undefined ? (upload ? upload.toISOString() : null) : (lastUpload ? lastUpload.toISOString() : null),
       }));
     } catch(e) {}
   };
@@ -155,7 +160,7 @@ function useGistSync(store, setStore) {
       const errText = await res.text().catch(() => "");
       if (res.status === 401) {
         setGistToken(null);
-        persistState(null, gistId, gistUser, lastSync);
+        persistState(null, gistId, gistUser, lastSync, lastUpload);
         throw new Error("Token 無效或已撤銷，請重新輸入");
       }
       throw new Error("GitHub API " + res.status + ": " + errText.slice(0, 120));
@@ -230,9 +235,9 @@ function useGistSync(store, setStore) {
       if (!existingId) {
         const newId = await createGist(storeRef.current, token);
         const now = new Date();
-        setGistToken(token); setGistId(newId); setGistUser(user); setLastSync(now);
-        startupDoneRef.current = true; // startup already handled by connect
-        persistState(token, newId, user, now);
+        setGistToken(token); setGistId(newId); setGistUser(user); setLastSync(now); setLastUpload(now);
+        setStartupDone(true);
+        persistState(token, newId, user, now, now);
         alert("✅ 已建立雲端備份並啟用自動同步！\n\n換機時輸入同一 Token 即可恢復資料。");
       } else {
         const doImport = window.confirm(
@@ -248,9 +253,10 @@ function useGistSync(store, setStore) {
           await uploadGist(existingId, storeRef.current, token);
         }
         const now = new Date();
+        if (!doImport) setLastUpload(now);
         setGistToken(token); setGistId(existingId); setGistUser(user); setLastSync(now);
-        startupDoneRef.current = true; // startup already handled by connect
-        persistState(token, existingId, user, now);
+        setStartupDone(true);
+        persistState(token, existingId, user, now, doImport ? lastUpload : now);
         alert("✅ " + (doImport ? "已導入雲端資料，" : "已上傳本機資料，") + "自動同步已啟用！");
       }
     } catch(e) {
@@ -266,9 +272,10 @@ function useGistSync(store, setStore) {
   const disconnect = () => {
     if (!window.confirm("確定斷開雲端同步？（本機資料保留，雲端備份不刪除）")) return;
     setGistToken(null); setGistId(null); setGistUser(null);
-    setLastSync(null); setSyncError(null);
-    startupDoneRef.current = false;
+    setLastSync(null); setLastUpload(null); setSyncError(null);
+    setStartupDone(false);
     justImportedRef.current = false;
+    startupJustSyncedRef.current = false;
     try { localStorage.removeItem(GIST_STATE_KEY); } catch(e) {}
   };
 
@@ -279,8 +286,8 @@ function useGistSync(store, setStore) {
     try {
       await uploadGist(gistId, storeRef.current, gistToken);
       const now = new Date();
-      setLastSync(now);
-      persistState(gistToken, gistId, gistUser, now);
+      setLastSync(now); setLastUpload(now);
+      persistState(gistToken, gistId, gistUser, now, now);
     } catch(e) {
       setSyncError(e.message);
       console.error("SyncNow error:", e);
@@ -288,8 +295,8 @@ function useGistSync(store, setStore) {
   };
 
   // ── Refs for sync coordination ────────────────────────────────────────────
-  const justImportedRef  = useRef(false); // skip debounce upload after cloud import
-  const startupDoneRef   = useRef(false); // debounce waits for startup to finish
+  const justImportedRef      = useRef(false); // skip debounce upload after cloud import
+  const startupJustSyncedRef = useRef(false); // skip debounce upload immediately after startup finishes
 
   // ── Startup sync (once on mount) ─────────────────────────────────────────
   // Compare _lastModified (stamped only on entry/budget changes, not uploads).
@@ -312,7 +319,9 @@ function useGistSync(store, setStore) {
         const localModMs = dateToMs(storeRef.current._lastModified)
           || dateToMs(saved?.lastSync);
 
-        if (cloudModMs > localModMs) {
+        const cloudIsNewer = cloudModMs > localModMs;
+
+        if (cloudIsNewer) {
           // ☁️ Cloud is newer — import
           normalizeStore(cloudData);
           justImportedRef.current = true;
@@ -325,13 +334,15 @@ function useGistSync(store, setStore) {
         if (alive) {
           const now = new Date();
           setLastSync(now);
-          persistState(gistToken, gistId, gistUser, now);
-          startupDoneRef.current = true;
+          if (!cloudIsNewer) setLastUpload(now);
+          startupJustSyncedRef.current = true;
+          setStartupDone(true);
+          persistState(gistToken, gistId, gistUser, now, cloudIsNewer ? lastUpload : now);
         }
       } catch(e) {
         if (alive) setSyncError(e.message || "啟動同步失敗");
         console.error("StartupSync error:", e);
-        if (alive) startupDoneRef.current = true;
+        if (alive) { startupJustSyncedRef.current = true; setStartupDone(true); }
       } finally {
         if (alive) setSyncing(false);
       }
@@ -341,21 +352,24 @@ function useGistSync(store, setStore) {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps — runs once on mount
 
   // ── Debounce upload on store changes (after startup completes) ────────────
+  // startupDone is in deps so the effect re-runs when startup finishes,
+  // catching any store changes that were skipped while startup was still running.
   useEffect(() => {
     if (!gistToken || !gistId) return;
-    if (!startupDoneRef.current) return; // wait for startup sync
+    if (!startupDone) return; // wait for startup sync (state, not ref — triggers re-run)
 
     let cancelled = false;
     const timer = setTimeout(async () => {
       if (cancelled) return;
       if (justImportedRef.current) { justImportedRef.current = false; return; }
+      if (startupJustSyncedRef.current) { startupJustSyncedRef.current = false; return; }
       try {
         setSyncing(true); setSyncError(null);
         await uploadGist(gistId, storeRef.current, gistToken);
         if (!cancelled) {
           const now = new Date();
-          setLastSync(now);
-          persistState(gistToken, gistId, gistUser, now);
+          setLastSync(now); setLastUpload(now);
+          persistState(gistToken, gistId, gistUser, now, now);
         }
       } catch(e) {
         if (!cancelled) setSyncError(e.message || "同步失敗");
@@ -366,9 +380,9 @@ function useGistSync(store, setStore) {
     }, 1500);
 
     return () => { cancelled = true; clearTimeout(timer); };
-  }, [store, gistToken, gistId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [store, gistToken, gistId, startupDone]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  return { gistToken, gistId, gistUser, lastSync, syncing, syncError, connect, disconnect, syncNow };
+  return { gistToken, gistId, gistUser, lastSync, lastUpload, syncing, syncError, connect, disconnect, syncNow };
 }
 // ===================== End GitHub Gist Sync =====================
 
@@ -888,7 +902,7 @@ function App() {
                 <>
                   <span style={{color:"var(--brand)"}}>☁️</span>
                   <span style={{color:"var(--brand)"}}>已同步</span>
-                  {drive.lastSync && <span className="text-gray-300">{new Date(drive.lastSync).toLocaleTimeString("zh-HK",{hour:"2-digit",minute:"2-digit"})}</span>}
+                  {drive.lastUpload && <span className="text-gray-300">{new Date(drive.lastUpload).toLocaleTimeString("zh-HK",{hour:"2-digit",minute:"2-digit"})}</span>}
                 </>
               )
             ) : (
@@ -2319,7 +2333,7 @@ function GistConnect({ onConnect, syncing }) {
   );
 }
 
-function GistSyncPanel({ drive }) {
+function GistSyncPanel({ drive, dataModified }) {
   const connected = !!(drive.gistToken && drive.gistId);
   return (
     <div className="bg-white rounded-2xl shadow-sm p-4 space-y-3">
@@ -2333,8 +2347,11 @@ function GistSyncPanel({ drive }) {
           {drive.syncError && (
             <div className="text-xs text-amber-600 bg-amber-50 px-3 py-2 rounded-xl">⚠️ {drive.syncError}</div>
           )}
-          {drive.lastSync && (
-            <div className="text-xs text-gray-400">最後同步：{new Date(drive.lastSync).toLocaleString("zh-HK")}</div>
+          {drive.lastUpload && (
+            <div className="text-xs text-gray-400">最後上傳：{new Date(drive.lastUpload).toLocaleString("zh-HK")}</div>
+          )}
+          {dataModified && (
+            <div className="text-xs text-gray-400">資料更新至：{new Date(dataModified).toLocaleString("zh-HK")}</div>
           )}
           <button onClick={drive.syncNow} disabled={drive.syncing}
             className="w-full py-2.5 rounded-xl text-sm font-semibold disabled:opacity-50 active:opacity-80"
@@ -2445,7 +2462,7 @@ function DataSettings({store, setStore, drive}) {
     />
     <div className="space-y-3">
       {msg&&<div className={`text-sm px-4 py-3 rounded-2xl text-center font-medium ${msg.err?"bg-red-50 text-red-600":"bg-green-50 text-green-700"}`}>{msg.text}</div>}
-      <GistSyncPanel drive={drive} />
+      <GistSyncPanel drive={drive} dataModified={store._lastModified} />
 
       <div className="bg-white rounded-2xl shadow-sm p-4 space-y-3">
         <div className="text-sm font-semibold">資料備份</div>
