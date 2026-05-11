@@ -477,9 +477,24 @@ const saveStore = s => { try { localStorage.setItem(STORE_KEY, JSON.stringify(s)
 const toBase = (amount, currency, rates, base) => amount * (rates[currency]||1) / (rates[base]||1);
 const evalExpr = (expr) => {
   try {
-    const e = (expr||"").replace(/×/g,'*').replace(/÷/g,'/').replace(/−/g,'-').replace(/＋/g,'+');
-    // eslint-disable-next-line no-new-func
-    const r = Function('"use strict";return('+e+')')();
+    const s = (expr||"").replace(/×/g,'*').replace(/÷/g,'/').replace(/−/g,'-').replace(/＋/g,'+');
+    const tokens = s.match(/(\d+\.?\d*|\.\d+|[+\-*/])/g);
+    if (!tokens) return null;
+    const nums = [], ops = [];
+    for (const tok of tokens) {
+      if (/[\d.]/.test(tok[0])) { const n=parseFloat(tok); if(isNaN(n)) return null; nums.push(n); }
+      else ops.push(tok);
+    }
+    if (nums.length === 0 || nums.length !== ops.length + 1) return null;
+    let i = 0;
+    while (i < ops.length) {
+      if (ops[i]==='*'||ops[i]==='/') {
+        const r = ops[i]==='*' ? nums[i]*nums[i+1] : nums[i]/nums[i+1];
+        nums.splice(i,2,r); ops.splice(i,1);
+      } else i++;
+    }
+    let r = nums[0];
+    for (let j=0;j<ops.length;j++) r = ops[j]==='+'?r+nums[j+1]:r-nums[j+1];
     return isFinite(r)&&!isNaN(r)&&r>0 ? Math.round(r*10000)/10000 : null;
   } catch { return null; }
 };
@@ -598,6 +613,18 @@ function importOurCSV(text, store) {
     imported++;
   }
   return {entries,categories:store.categories,imported};
+}
+
+/* ── 撤銷刪除 Toast ── */
+function UndoToast({onUndo, onDismiss}) {
+  useEffect(()=>{ const t=setTimeout(onDismiss,5000); return()=>clearTimeout(t); },[onDismiss]);
+  return (
+    <div className="fixed bottom-28 left-1/2 z-50 flex items-center gap-3 px-4 py-3 rounded-2xl shadow-lg fade-in"
+      style={{transform:"translateX(-50%)",background:"#1f2937",color:"#f9fafb",whiteSpace:"nowrap"}}>
+      <span className="text-sm">已刪除記帳</span>
+      <button onClick={onUndo} className="text-sm font-bold" style={{color:"var(--brand)"}}>撤銷</button>
+    </div>
+  );
 }
 
 /* ── 金額變化動畫 ── */
@@ -789,6 +816,9 @@ function App() {
     setTabDir(TAB_ORDER.indexOf(newTab)>TAB_ORDER.indexOf(cur)?1:-1);
     setTab(newTab);
   }, []);
+  const [mountedTabs, setMountedTabs] = useState(()=>new Set([tab]));
+  useEffect(()=>{ setMountedTabs(prev=>{ const s=new Set(prev); s.add(tab); return s; }); },[tab]);
+
   const [entryOpen, setEntryOpen] = useState(false);
   const [entryCloseSignal, setEntryCloseSignal] = useState(0);
   const [editing, setEditing] = useState(null);
@@ -861,6 +891,8 @@ function App() {
     return { inc, exp, net, tb };
   }, [monthEntries, rates, base, store.totalBudget, store.budgetInBalance, store.useMonthlyBudget, store.monthlyBudgets, viewMonth]);
 
+  const [undoEntry, setUndoEntry] = useState(null);
+
   const upsertEntry = (entry) => {
     setStore(s => {
       const list = [...s.entries];
@@ -869,7 +901,16 @@ function App() {
       return {...s, entries:list, _lastModified: new Date().toISOString()};
     });
   };
-  const removeEntry = (id) => setStore(s => ({...s, entries:s.entries.filter(e=>e.id!==id), _lastModified: new Date().toISOString()}));
+  const removeEntry = (id) => {
+    const entry = store.entries.find(e=>e.id===id);
+    setStore(s => ({...s, entries:s.entries.filter(e=>e.id!==id), _lastModified: new Date().toISOString()}));
+    if (entry) setUndoEntry(entry);
+  };
+  const undoDelete = useCallback(() => {
+    if (!undoEntry) return;
+    setStore(s => ({...s, entries:[...s.entries, undoEntry], _lastModified: new Date().toISOString()}));
+    setUndoEntry(null);
+  }, [undoEntry]);
 
   // Track the back-stack handler for the entry modal so we can pop it
   const openAdd  = () => { setEditing(null); setLayer('entryModal', ()=>setEntryCloseSignal(s=>s+1)); setEntryOpen(true); };
@@ -939,12 +980,20 @@ function App() {
       </header>
 
       <main className="safe-bottom" style={{overflow:"hidden"}} {...useSwipeNav({onBack: handleBack})}>
-        <div key={tab} className={tabDir>0?"tab-slide-right":tabDir<0?"tab-slide-left":""}>
-          {tab==="home"  && <HomeView store={store} rates={rates} base={base} entries={monthEntries} onEdit={openEdit} onDelete={removeEntry} onCopy={openCopy} monthTotals={monthTotals} viewMonth={viewMonth} />}
-          {tab==="cal"   && <CalendarView store={store} rates={rates} base={base} viewMonth={viewMonth} entries={monthEntries} onEdit={openEdit} />}
-          {tab==="chart" && <ChartView store={store} rates={rates} base={base} entries={monthEntries} allEntries={store.entries} viewMonth={viewMonth} onEdit={openEdit} />}
-          {tab==="set"   && <SettingsView store={store} setStore={setStore} drive={drive}/>}
-        </div>
+        {["home","cal","chart","set"].map(t=>(
+          <div key={t}
+            className={tab===t?(tabDir>0?"tab-slide-right":tabDir<0?"tab-slide-left":""):""}
+            style={{display:tab===t?"":"none"}}>
+            {mountedTabs.has(t)&&(
+              <>
+                {t==="home"  && <HomeView store={store} rates={rates} base={base} entries={monthEntries} onEdit={openEdit} onDelete={removeEntry} onCopy={openCopy} monthTotals={monthTotals} viewMonth={viewMonth}/>}
+                {t==="cal"   && <CalendarView store={store} rates={rates} base={base} viewMonth={viewMonth} entries={monthEntries} onEdit={openEdit}/>}
+                {t==="chart" && <ChartView store={store} rates={rates} base={base} entries={monthEntries} allEntries={store.entries} viewMonth={viewMonth} onEdit={openEdit}/>}
+                {t==="set"   && <SettingsView store={store} setStore={setStore} drive={drive}/>}
+              </>
+            )}
+          </div>
+        ))}
       </main>
 
       <button onClick={openAdd} className="fixed right-5 bottom-24 w-14 h-14 rounded-full grid place-items-center active:scale-90 transition-transform duration-100" style={{background:"linear-gradient(135deg,var(--brand-from),var(--brand-to))",color:"white",boxShadow:"0 6px 24px var(--brand-glow)"}} aria-label="新增記帳">
@@ -974,6 +1023,9 @@ function App() {
       )}
       {monthPickerOpen && (
         <MonthPicker value={viewMonth} onChange={setViewMonth} onClose={()=>setMonthPickerOpen(false)}/>
+      )}
+      {undoEntry && (
+        <UndoToast onUndo={undoDelete} onDismiss={()=>setUndoEntry(null)}/>
       )}
     </div>
   );
@@ -1083,14 +1135,21 @@ function HomeView({store, rates, base, entries, onEdit, onDelete, onCopy, monthT
   },[entries]);
 
   const [search, setSearch] = useState("");
+  const isSearching = search.trim().length > 0;
+
   const filteredGroups = useMemo(()=>{
-    if(!search.trim()) return groups;
+    if(!isSearching) return groups;
     const q=search.toLowerCase();
-    return groups.map(([date,list])=>[date,list.filter(e=>{
-      const cat=catMap[e.category]||{};
-      return (e.memo||"").toLowerCase().includes(q)||(cat.name||"").toLowerCase().includes(q)||String(e.amount).includes(q);
-    })]).filter(([,list])=>list.length>0);
-  },[groups,search,catMap]);
+    const srcMap={};
+    store.entries.forEach(e=>{ (srcMap[e.date]||(srcMap[e.date]=[])).push(e); });
+    return Object.entries(srcMap)
+      .map(([date,list])=>[date,list.filter(e=>{
+        const cat=catMap[e.category]||{};
+        return (e.memo||"").toLowerCase().includes(q)||(cat.name||"").toLowerCase().includes(q)||String(e.amount).includes(q);
+      })])
+      .filter(([,list])=>list.length>0)
+      .sort((a,b)=>a[0]<b[0]?1:-1);
+  },[groups,search,isSearching,store.entries,catMap]);
 
   const PAGE=7;
   const [visibleCount,setVisibleCount]=useState(PAGE);
@@ -1232,6 +1291,9 @@ function HomeView({store, rates, base, entries, onEdit, onDelete, onCopy, monthT
           {search&&<button onClick={()=>{setSearch("");setVisibleCount(PAGE);}} className="text-gray-300 text-lg leading-none">×</button>}
         </div>
       </div>
+      {isSearching&&filteredGroups.some(([date])=>!date.startsWith(viewMonth))&&(
+        <div className="text-xs text-center text-gray-400 px-1">顯示所有月份的搜尋結果</div>
+      )}
 
       {filteredGroups.length===0?(
         <div className="flex flex-col items-center py-14 text-center px-6">
@@ -1389,6 +1451,51 @@ function CalendarView({store, rates, base, viewMonth, entries, onEdit}) {
   );
 }
 
+/* ── 近6個月趨勢 ── */
+function TrendChart({allEntries, base, rates, nd}) {
+  const months = useMemo(()=>{
+    const now=new Date();
+    return Array.from({length:6},(_,i)=>{
+      const d=new Date(now.getFullYear(),now.getMonth()-5+i,1);
+      const ym=monthKey(d);
+      let inc=0,exp=0;
+      allEntries.filter(e=>e.date.startsWith(ym)).forEach(e=>{
+        const v=toBase(e.amount,e.currency,rates,base);
+        if(e.type==="income") inc+=v; else exp+=v;
+      });
+      return {ym, label:`${d.getMonth()+1}月`, inc, exp};
+    });
+  },[allEntries,base,rates]);
+
+  const maxVal=Math.max(...months.flatMap(m=>[m.inc,m.exp]),1);
+  const H=90, BAR=18, SLOT=56;
+  const W=months.length*SLOT;
+
+  return (
+    <div className="bg-white rounded-2xl shadow-sm p-4">
+      <div className="text-sm font-semibold mb-3">近 6 個月趨勢</div>
+      <svg width="100%" viewBox={`0 0 ${W} ${H+28}`} preserveAspectRatio="xMidYMid meet">
+        {months.map((m,i)=>{
+          const x=i*SLOT+SLOT/2;
+          const iH=Math.round((m.inc/maxVal)*H);
+          const eH=Math.round((m.exp/maxVal)*H);
+          return (
+            <g key={m.ym}>
+              <rect x={x-BAR-1} y={H-iH} width={BAR} height={iH||2} rx="3" fill="var(--income)" opacity="0.65"/>
+              <rect x={x+1}     y={H-eH} width={BAR} height={eH||2} rx="3" fill="var(--expense)" opacity="0.65"/>
+              <text x={x} y={H+16} textAnchor="middle" fontSize="10" fill="#9CA3AF">{m.label}</text>
+            </g>
+          );
+        })}
+      </svg>
+      <div className="flex items-center gap-4 mt-1">
+        <div className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 rounded-sm" style={{background:"var(--income)",opacity:.7}}/><span className="text-xs text-gray-400">收入</span></div>
+        <div className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 rounded-sm" style={{background:"var(--expense)",opacity:.7}}/><span className="text-xs text-gray-400">支出</span></div>
+      </div>
+    </div>
+  );
+}
+
 /* ===================== 圖表 ===================== */
 function ChartView({store, rates, base, entries, allEntries, viewMonth, onEdit}) {
   const nd = store.settings?.noDecimals||false;
@@ -1516,6 +1623,9 @@ function ChartView({store, rates, base, entries, allEntries, viewMonth, onEdit})
           ))}
         </div>
       </div>
+
+      {/* 近6個月趨勢（月份模式才顯示） */}
+      {period==="month"&&<TrendChart allEntries={allEntries||[]} base={base} rates={rates} nd={nd}/>}
 
       {/* 大圓餅 */}
       <div className="bg-white rounded-2xl shadow-sm p-4">
@@ -1792,7 +1902,7 @@ function OtherView({store, setStore}) {
     }
   };
   const aboutRows = [
-    ["版本","v1.0.260511",false],
+    ["版本","v1.1.260511",false],
     ["製作者","AKiRa",true],
     ["技術","React · Tailwind · PWA",false],
     ["支援幣種","MOP · HKD · CNY · JPY · TWD",false],
