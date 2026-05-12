@@ -159,9 +159,7 @@ function useGistSync(store, setStore) {
     if (!res.ok) {
       const errText = await res.text().catch(() => "");
       if (res.status === 401) {
-        setGistToken(null);
-        persistState(null, gistId, gistUser, lastSync, lastUpload);
-        throw new Error("Token 無效或已撤銷，請重新輸入");
+        throw new Error("Token 無效或已撤銷，請在設定中斷開並重新連接");
       }
       throw new Error("GitHub API " + res.status + ": " + errText.slice(0, 120));
     }
@@ -866,6 +864,8 @@ function App() {
   const openAddRef = useRef(null);
   useEffect(()=>{ openAddRef.current = openAdd; });
   useEffect(()=>{
+    // Request persistent storage (prevents iOS from clearing localStorage)
+    navigator.storage?.persist?.().catch(()=>{});
     // Handle ?action=add from manifest shortcut
     if(new URLSearchParams(window.location.search).get("action")==="add"){
       setTimeout(()=>openAddRef.current?.(), 150);
@@ -1984,7 +1984,7 @@ function OtherView({store, setStore}) {
     }
   };
   const aboutRows = [
-    ["版本","v1.1.260512",false],
+    ["版本","v1.1.260513",false],
     ["製作者","AKiRa",true],
     ["技術","React · Tailwind · PWA",false],
     ["支援幣種","MOP · HKD · CNY · JPY · TWD",false],
