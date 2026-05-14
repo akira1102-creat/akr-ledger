@@ -1987,7 +1987,7 @@ function OtherView({store, setStore}) {
     }
   };
   const aboutRows = [
-    ["版本","v1.1.260514b",false],
+    ["版本","v1.1.260515",false],
     ["製作者","AKiRa",true],
     ["技術","React · Tailwind · PWA",false],
     ["支援幣種","MOP · HKD · CNY · JPY · TWD",false],
@@ -2089,7 +2089,7 @@ function FunView({store}) {
   );
 }
 
-/* ===================== 收條生成 ===================== */
+/* ===================== 收據生成 ===================== */
 function ReceiptView({store}) {
   const base = store.settings.baseCurrency;
   const rates = store.settings.rates;
@@ -2129,52 +2129,73 @@ function ReceiptView({store}) {
     const today=new Date().toLocaleDateString('zh-HK');
     const msg=MSGS[new Date().getDate()%MSGS.length];
     const W=480, PAD=32;
+    const TOOTH_W=24, TH=16;
+    const IS=48;
     const F=(sz,b)=>b?`bold ${sz}px 'Courier New',Courier,monospace`:`${sz}px 'Courier New',Courier,monospace`;
     let h=130;
     cats.forEach(c=>{h+=36+c.children.length*24+20;});
     if(cats.length===0) h+=40;
-    h+=totalInc>0?130:80; h+=110;
-    const cv=document.createElement('canvas');
-    cv.width=W; cv.height=h;
-    const ctx=cv.getContext('2d');
-    ctx.fillStyle='#FFFEF7'; ctx.fillRect(0,0,W,h);
-    ctx.strokeStyle='#ddd'; ctx.lineWidth=1; ctx.strokeRect(0.5,0.5,W-1,h-1);
-    let y=44;
-    const T=(s,align,yp,sz,bold,col)=>{
-      ctx.font=F(sz,bold); ctx.fillStyle=col||'#1a1a1a'; ctx.textAlign=align;
-      ctx.fillText(s,align==='center'?W/2:align==='right'?W-PAD:PAD,yp); ctx.textAlign='left';
+    h+=totalInc>0?130:80; h+=110+IS+24;
+    const draw=(icon)=>{
+      const cv=document.createElement('canvas');
+      cv.width=W; cv.height=h;
+      const ctx=cv.getContext('2d');
+      ctx.fillStyle='#e8e4da'; ctx.fillRect(0,0,W,h);
+      ctx.beginPath(); ctx.moveTo(0,TH);
+      for(let x=0;x<W;x+=TOOTH_W){ctx.lineTo(x+TOOTH_W/2,0);ctx.lineTo(x+TOOTH_W,TH);}
+      ctx.lineTo(W,h); ctx.lineTo(0,h); ctx.closePath();
+      ctx.fillStyle='#FFFEF7'; ctx.fill();
+      let y=TH+28;
+      const T=(s,align,yp,sz,bold,col)=>{
+        ctx.font=F(sz,bold); ctx.fillStyle=col||'#1a1a1a'; ctx.textAlign=align;
+        ctx.fillText(s,align==='center'?W/2:align==='right'?W-PAD:PAD,yp); ctx.textAlign='left';
+      };
+      const dsh=(yp,c='#ccc',p=[4,4])=>{ctx.setLineDash(p);ctx.strokeStyle=c;ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(PAD,yp);ctx.lineTo(W-PAD,yp);ctx.stroke();ctx.setLineDash([]);};
+      const sld=(yp,c='#666',lw=1.5)=>{ctx.setLineDash([]);ctx.strokeStyle=c;ctx.lineWidth=lw;ctx.beginPath();ctx.moveTo(PAD,yp);ctx.lineTo(W-PAD,yp);ctx.stroke();};
+      T('* AKR 記帳本 · 收據 *','center',y,17,true); y+=26;
+      T('━━━━━━━━━━━━━━━━━━━━━━━━━━━━','center',y,12,false,'#bbb'); y+=22;
+      T(`${y1} 年 ${y2} 月份支出明細`,'center',y,15,true); y+=22;
+      T(`生成日期: ${today}`,'center',y,11,false,'#888'); y+=22;
+      dsh(y,'#bbb',[3,3]); y+=18;
+      if(cats.length===0){T('本月無支出記錄','center',y,13,false,'#aaa');y+=36;}
+      else cats.forEach(cat=>{
+        T(`${cat.icon} ${cat.name}`,'left',y,14,true); T(fmt(cat.total,base,nd),'right',y,14,true,'#c0392b'); y+=30;
+        cat.children.forEach(ch=>{T(`  └ ${ch.name}`,'left',y,12,false,'#555');T(fmt(ch.total,base,nd),'right',y,12,false,'#555');y+=22;});
+        y+=4; dsh(y,'#ddd'); y+=14;
+      });
+      sld(y,'#555',2); y+=22;
+      T('支出合計','left',y,15,true); T(fmt(totalExp,base,nd),'right',y,15,true,'#c0392b'); y+=30;
+      if(totalInc>0){
+        T('收入合計','left',y,15,true); T(fmt(totalInc,base,nd),'right',y,15,true,'#27ae60'); y+=30;
+        dsh(y,'#999',[2,2]); y+=14;
+        T('結　　餘','left',y,16,true); T((net<0?'-':'')+fmt(Math.abs(net),base,nd),'right',y,16,true,net>=0?'#27ae60':'#c0392b'); y+=30;
+      }
+      sld(y,'#555',2); y+=22;
+      T(`共 ${count} 筆記帳`,'center',y,11,false,'#888'); y+=20;
+      T(msg,'center',y,11,false,'#888'); y+=20;
+      dsh(y,'#ccc',[3,6]); y+=16;
+      T(`No.${month.replace('-','')}-${String(count).padStart(4,'0')}`,'center',y,11,false,'#bbb'); y+=16;
+      T('─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─','center',y,11,false,'#ddd'); y+=20;
+      if(icon){
+        const ix=(W-IS)/2, iy=y;
+        ctx.save();
+        const r=10;
+        ctx.beginPath();
+        ctx.moveTo(ix+r,iy);ctx.lineTo(ix+IS-r,iy);ctx.quadraticCurveTo(ix+IS,iy,ix+IS,iy+r);
+        ctx.lineTo(ix+IS,iy+IS-r);ctx.quadraticCurveTo(ix+IS,iy+IS,ix+IS-r,iy+IS);
+        ctx.lineTo(ix+r,iy+IS);ctx.quadraticCurveTo(ix,iy+IS,ix,iy+IS-r);
+        ctx.lineTo(ix,iy+r);ctx.quadraticCurveTo(ix,iy,ix+r,iy);
+        ctx.closePath();ctx.clip();
+        ctx.drawImage(icon,ix,iy,IS,IS);
+        ctx.restore();
+      }
+      cv.toBlob(blob=>{
+        const url=URL.createObjectURL(blob);
+        const a=document.createElement('a'); a.href=url; a.download=`AKR收據_${month}.png`; a.click();
+        URL.revokeObjectURL(url); setDownloading(false);
+      },'image/png');
     };
-    const dsh=(yp,c='#ccc',p=[4,4])=>{ctx.setLineDash(p);ctx.strokeStyle=c;ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(PAD,yp);ctx.lineTo(W-PAD,yp);ctx.stroke();ctx.setLineDash([]);};
-    const sld=(yp,c='#666',lw=1.5)=>{ctx.setLineDash([]);ctx.strokeStyle=c;ctx.lineWidth=lw;ctx.beginPath();ctx.moveTo(PAD,yp);ctx.lineTo(W-PAD,yp);ctx.stroke();};
-    T('* AKR 記帳本 · レシート *','center',y,17,true); y+=26;
-    T('━━━━━━━━━━━━━━━━━━━━━━━━━━━━','center',y,12,false,'#bbb'); y+=22;
-    T(`${y1} 年 ${y2} 月份支出明細`,'center',y,15,true); y+=22;
-    T(`生成日期: ${today}`,'center',y,11,false,'#888'); y+=22;
-    dsh(y,'#bbb',[3,3]); y+=18;
-    if(cats.length===0){T('本月無支出記錄','center',y,13,false,'#aaa');y+=36;}
-    else cats.forEach(cat=>{
-      T(`${cat.icon} ${cat.name}`,'left',y,14,true); T(fmt(cat.total,base,nd),'right',y,14,true,'#c0392b'); y+=30;
-      cat.children.forEach(ch=>{T(`  └ ${ch.name}`,'left',y,12,false,'#555');T(fmt(ch.total,base,nd),'right',y,12,false,'#555');y+=22;});
-      y+=4; dsh(y,'#ddd'); y+=14;
-    });
-    sld(y,'#555',2); y+=22;
-    T('支出合計','left',y,15,true); T(fmt(totalExp,base,nd),'right',y,15,true,'#c0392b'); y+=30;
-    if(totalInc>0){
-      T('收入合計','left',y,15,true); T(fmt(totalInc,base,nd),'right',y,15,true,'#27ae60'); y+=30;
-      dsh(y,'#999',[2,2]); y+=14;
-      T('結　　餘','left',y,16,true); T((net<0?'-':'')+fmt(Math.abs(net),base,nd),'right',y,16,true,net>=0?'#27ae60':'#c0392b'); y+=30;
-    }
-    sld(y,'#555',2); y+=22;
-    T(`共 ${count} 筆記帳`,'center',y,11,false,'#888'); y+=20;
-    T(msg,'center',y,11,false,'#888'); y+=20;
-    dsh(y,'#ccc',[3,6]); y+=16;
-    T(`No.${month.replace('-','')}-${String(count).padStart(4,'0')}`,'center',y,11,false,'#bbb'); y+=16;
-    T('─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─','center',y,11,false,'#ddd');
-    cv.toBlob(blob=>{
-      const url=URL.createObjectURL(blob);
-      const a=document.createElement('a'); a.href=url; a.download=`AKR收條_${month}.png`; a.click();
-      URL.revokeObjectURL(url); setDownloading(false);
-    },'image/png');
+    const img=new Image(); img.onload=()=>draw(img); img.onerror=()=>draw(null); img.src='./icon-192.png';
   };
 
   const {cats,totalExp,totalInc,count}=data;
@@ -2191,58 +2212,64 @@ function ReceiptView({store}) {
         </button>
       </div>
       {/* Receipt Preview */}
-      <div className="rounded-2xl overflow-hidden shadow-md" style={{background:'#FFFEF7',fontFamily:"'Courier New',Courier,monospace",border:'1px solid #e0ddd0'}}>
-        <div className="text-center py-4 px-4 border-b border-dashed border-gray-300">
-          <div className="font-bold tracking-wide" style={{fontSize:15}}>* AKR 記帳本 · レシート *</div>
-          <div className="text-gray-400 mt-0.5" style={{fontSize:11}}>━━━━━━━━━━━━━━━━━━━━━━━━━━</div>
-          <div className="font-bold mt-1" style={{fontSize:13}}>{y1} 年 {y2} 月份支出明細</div>
-          <div className="text-gray-400 mt-0.5" style={{fontSize:11}}>生成日期: {new Date().toLocaleDateString('zh-HK')}</div>
-        </div>
-        <div className="px-4 py-2" style={{fontSize:13}}>
-          {cats.length===0?(
-            <div className="text-center text-gray-400 py-3" style={{fontSize:12}}>本月無支出記錄</div>
-          ):cats.map(cat=>(
-            <div key={cat.id} className="mb-1">
-              <div className="flex justify-between items-baseline py-1 font-bold">
-                <span>{cat.icon} {cat.name}</span>
-                <span style={{color:'#c0392b'}}>{fmt(cat.total,base,nd)}</span>
-              </div>
-              {cat.children.map(ch=>(
-                <div key={ch.id} className="flex justify-between items-baseline py-0.5 pl-3" style={{fontSize:11,color:'#555'}}>
-                  <span>└ {ch.name}</span><span>{fmt(ch.total,base,nd)}</span>
-                </div>
-              ))}
-              <div className="border-b border-dashed border-gray-200 mt-1"/>
-            </div>
-          ))}
-        </div>
-        <div className="mx-4 border-t-2 border-gray-500 py-2" style={{fontSize:13}}>
-          <div className="flex justify-between font-bold py-0.5">
-            <span>支出合計</span><span style={{color:'#c0392b'}}>{fmt(totalExp,base,nd)}</span>
+      <div className="overflow-hidden shadow-md" style={{fontFamily:"'Courier New',Courier,monospace",background:'#e8e4da',borderRadius:'0 0 16px 16px'}}>
+        <svg viewBox="0 0 480 16" preserveAspectRatio="none" style={{display:'block',width:'100%',height:16}}>
+          <polygon points="0,16 12,0 24,16 36,0 48,16 60,0 72,16 84,0 96,16 108,0 120,16 132,0 144,16 156,0 168,16 180,0 192,16 204,0 216,16 228,0 240,16 252,0 264,16 276,0 288,16 300,0 312,16 324,0 336,16 348,0 360,16 372,0 384,16 396,0 408,16 420,0 432,16 444,0 456,16 468,0 480,16" fill="#FFFEF7"/>
+        </svg>
+        <div style={{background:'#FFFEF7'}}>
+          <div className="text-center py-4 px-4 border-b border-dashed border-gray-300">
+            <div className="font-bold tracking-wide" style={{fontSize:15}}>* AKR 記帳本 · 收據 *</div>
+            <div className="text-gray-400 mt-0.5" style={{fontSize:11}}>━━━━━━━━━━━━━━━━━━━━━━━━━━</div>
+            <div className="font-bold mt-1" style={{fontSize:13}}>{y1} 年 {y2} 月份支出明細</div>
+            <div className="text-gray-400 mt-0.5" style={{fontSize:11}}>生成日期: {new Date().toLocaleDateString('zh-HK')}</div>
           </div>
-          {totalInc>0&&<>
+          <div className="px-4 py-2" style={{fontSize:13}}>
+            {cats.length===0?(
+              <div className="text-center text-gray-400 py-3" style={{fontSize:12}}>本月無支出記錄</div>
+            ):cats.map(cat=>(
+              <div key={cat.id} className="mb-1">
+                <div className="flex justify-between items-baseline py-1 font-bold">
+                  <span>{cat.icon} {cat.name}</span>
+                  <span style={{color:'#c0392b'}}>{fmt(cat.total,base,nd)}</span>
+                </div>
+                {cat.children.map(ch=>(
+                  <div key={ch.id} className="flex justify-between items-baseline py-0.5 pl-3" style={{fontSize:11,color:'#555'}}>
+                    <span>└ {ch.name}</span><span>{fmt(ch.total,base,nd)}</span>
+                  </div>
+                ))}
+                <div className="border-b border-dashed border-gray-200 mt-1"/>
+              </div>
+            ))}
+          </div>
+          <div className="mx-4 border-t-2 border-gray-500 py-2" style={{fontSize:13}}>
             <div className="flex justify-between font-bold py-0.5">
-              <span>收入合計</span><span style={{color:'#27ae60'}}>{fmt(totalInc,base,nd)}</span>
+              <span>支出合計</span><span style={{color:'#c0392b'}}>{fmt(totalExp,base,nd)}</span>
             </div>
-            <div className="border-t border-dashed border-gray-300 my-1"/>
-            <div className="flex justify-between font-bold py-0.5" style={{fontSize:14}}>
-              <span>結　　餘</span>
-              <span style={{color:net>=0?'#27ae60':'#c0392b'}}>{net<0?'-':''}{fmt(Math.abs(net),base,nd)}</span>
-            </div>
-          </>}
-        </div>
-        <div className="text-center py-3 mx-4 border-t-2 border-gray-500" style={{fontSize:11}}>
-          <div className="text-gray-400">共 {count} 筆記帳</div>
-          <div className="text-gray-400 mt-0.5">{MSGS[msgIdx]}</div>
-          <div className="border-t border-dashed border-gray-200 mt-2 mb-1"/>
-          <div className="text-gray-300">No.{month.replace('-','')}-{String(count).padStart(4,'0')}</div>
-          <div style={{color:'#e5e7eb'}}>─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─</div>
+            {totalInc>0&&<>
+              <div className="flex justify-between font-bold py-0.5">
+                <span>收入合計</span><span style={{color:'#27ae60'}}>{fmt(totalInc,base,nd)}</span>
+              </div>
+              <div className="border-t border-dashed border-gray-300 my-1"/>
+              <div className="flex justify-between font-bold py-0.5" style={{fontSize:14}}>
+                <span>結　　餘</span>
+                <span style={{color:net>=0?'#27ae60':'#c0392b'}}>{net<0?'-':''}{fmt(Math.abs(net),base,nd)}</span>
+              </div>
+            </>}
+          </div>
+          <div className="text-center py-3 mx-4 border-t-2 border-gray-500" style={{fontSize:11}}>
+            <div className="text-gray-400">共 {count} 筆記帳</div>
+            <div className="text-gray-400 mt-0.5">{MSGS[msgIdx]}</div>
+            <div className="border-t border-dashed border-gray-200 mt-2 mb-1"/>
+            <div className="text-gray-300">No.{month.replace('-','')}-{String(count).padStart(4,'0')}</div>
+            <div style={{color:'#e5e7eb'}}>─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─</div>
+            <img src="./icon-192.png" alt="" style={{width:40,height:40,borderRadius:8,margin:'8px auto 4px'}}/>
+          </div>
         </div>
       </div>
       <button onClick={download} disabled={downloading}
         className="w-full py-3.5 rounded-2xl text-sm font-semibold text-white shadow-md active:opacity-80 disabled:opacity-50"
         style={{background:'linear-gradient(135deg,var(--brand-from),var(--brand-to))'}}>
-        {downloading?'⏳ 生成中…':'📥 下載收條圖片 (.png)'}
+        {downloading?'⏳ 生成中…':'📥 下載收據圖片 (.png)'}
       </button>
       {showPicker&&<MonthPicker value={month} onChange={setMonth} onClose={()=>setShowPicker(false)}/>}
     </div>
