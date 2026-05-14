@@ -1106,6 +1106,56 @@ function EntryItem({e, cat, base, onEdit, onCopy, onDelete, nd=false}) {
   );
 }
 
+function MiniDonut({topP,topCatMap,total,base,nd}) {
+  const [selId,setSelId]=useState(null);
+  const size=132,r=46,strokeW=18,circ=2*Math.PI*r;
+  const labelR=r+strokeW/2+10;
+  let acc=0,lAcc=0;
+  const segs=topP.map((c,i)=>{
+    const amt=topCatMap[c.id]||0,frac=amt/total;
+    const midAng=((lAcc+frac/2)*360-90)*Math.PI/180;
+    const rot=(acc/total)*360-90;
+    const ringX=size/2+(r+strokeW/2)*Math.cos(midAng);
+    const ringY=size/2+(r+strokeW/2)*Math.sin(midAng);
+    const lx=size/2+labelR*Math.cos(midAng);
+    const ly=size/2+labelR*Math.sin(midAng);
+    acc+=amt; lAcc+=frac;
+    return {c,amt,frac,rot,ringX,ringY,lx,ly,showLabel:i<4};
+  });
+  const sel=selId?topP.find(c=>c.id===selId):null;
+  return (
+    <div style={{position:"relative",width:size,height:size,flexShrink:0}}>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{overflow:"visible"}}>
+        <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="#F1F1F4" strokeWidth={strokeW}/>
+        {segs.map(({c,frac,rot,ringX,ringY,lx,ly,showLabel})=>(
+          <g key={c.id} style={{cursor:"pointer"}} onClick={()=>setSelId(selId===c.id?null:c.id)}>
+            <circle cx={size/2} cy={size/2} r={r} fill="none"
+              stroke={c.color} strokeWidth={selId===c.id?strokeW+10:strokeW}
+              strokeDasharray={`${frac*circ} ${circ}`} strokeDashoffset="0"
+              opacity={selId&&selId!==c.id?0.3:1}
+              transform={`rotate(${rot} ${size/2} ${size/2})`}
+              style={{transition:"all .15s ease"}}/>
+            {showLabel&&frac>=0.05&&!selId&&lx>=size/2&&(
+              <g>
+                <line x1={ringX} y1={ringY} x2={lx} y2={ly} stroke={c.color} strokeWidth="1" opacity="0.7"/>
+                <text x={lx+2} y={ly} textAnchor="start" dominantBaseline="middle"
+                  fontSize="8" fontWeight="600" fill={c.color}>{c.name}</text>
+              </g>
+            )}
+          </g>
+        ))}
+      </svg>
+      <div style={{position:"absolute",top:0,left:0,width:size,height:size,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",pointerEvents:"none"}}>
+        {sel&&<>
+          <div style={{fontSize:9,color:'#888',maxWidth:60,textAlign:"center",overflow:"hidden",whiteSpace:"nowrap",textOverflow:"ellipsis"}}>{sel.icon} {sel.name}</div>
+          <div style={{fontSize:13,fontWeight:"bold",color:sel.color}} className="amount-font">{fmt(topCatMap[sel.id]||0,base,nd)}</div>
+          <div style={{fontSize:9,color:'#aaa'}}>{Math.round((topCatMap[sel.id]||0)/total*100)}%</div>
+        </>}
+      </div>
+    </div>
+  );
+}
+
 function HomeView({store, rates, base, entries, onEdit, onDelete, onCopy, monthTotals, viewMonth}) {
   const nd = store.settings?.noDecimals||false;
   const now = new Date();
@@ -1208,45 +1258,8 @@ function HomeView({store, rates, base, entries, onEdit, onDelete, onCopy, monthT
           {(()=>{
             const total=Object.values(topCatMap).reduce((a,b)=>a+b,0);
             if(!total) return <div className="w-36 h-36 rounded-full bg-gray-100 grid place-items-center text-gray-400 text-xs flex-shrink-0">無支出</div>;
-            const size=144, r=52, strokeW=22, circ=2*Math.PI*r; let acc=0;
             const topP=store.categories.expense.filter(c=>!c.parentId&&(topCatMap[c.id]||0)>0);
-            const labelElems=[]; let labelAcc=0;
-            topP.forEach((c,i)=>{
-              const frac=(topCatMap[c.id]||0)/total;
-              if(i<3){
-                const midAngle=((labelAcc+frac/2)*360-90)*Math.PI/180;
-                const lx=size/2+r*Math.cos(midAngle);
-                const ly=size/2+r*Math.sin(midAngle);
-                labelElems.push({c,frac,lx,ly,midAngle});
-              }
-              labelAcc+=frac;
-            });
-            return (
-              <div style={{position:"relative",width:size,height:size,flexShrink:0}}>
-                <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{overflow:"visible"}}>
-                  <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="#F1F1F4" strokeWidth={strokeW}/>
-                  {topP.map(c=>{
-                    const frac=(topCatMap[c.id]||0)/total, dash=`${frac*circ} ${circ}`, rot=(acc/total)*360-90;
-                    acc+=(topCatMap[c.id]||0);
-                    return <circle key={c.id} cx={size/2} cy={size/2} r={r} fill="none" stroke={c.color} strokeWidth={strokeW} strokeDasharray={dash} strokeDashoffset="0" transform={`rotate(${rot} ${size/2} ${size/2})`}/>;
-                  })}
-                  {labelElems.map(({c,frac,lx,ly,midAngle})=>{
-                    if(frac<0.05) return null;
-                    const labelR=r+strokeW/2+16;
-                    const tx=size/2+labelR*Math.cos(midAngle);
-                    const ty=size/2+labelR*Math.sin(midAngle);
-                    if(tx<size/2) return null;
-                    return (
-                      <g key={c.id}>
-                        <line x1={lx} y1={ly} x2={tx} y2={ty} stroke={c.color} strokeWidth="1" opacity="0.7"/>
-                        <text x={tx+3} y={ty} textAnchor="start" dominantBaseline="middle"
-                          fontSize="9" fontWeight="600" fill={c.color}>{c.name}</text>
-                      </g>
-                    );
-                  })}
-                </svg>
-              </div>
-            );
+            return <MiniDonut topP={topP} topCatMap={topCatMap} total={total} base={base} nd={nd}/>;
           })()}
         </div>
         {topCats.length>0&&(
@@ -1987,7 +2000,7 @@ function OtherView({store, setStore}) {
     }
   };
   const aboutRows = [
-    ["版本","v1.1.260515b",false],
+    ["版本","v1.1.260515c",false],
     ["製作者","AKiRa",true],
     ["技術","React · Tailwind · PWA",false],
     ["支援幣種","MOP · HKD · CNY · JPY · TWD",false],
