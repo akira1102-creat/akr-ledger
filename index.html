@@ -1235,11 +1235,11 @@ function HomeView({store, rates, base, entries, onEdit, onDelete, onCopy, monthT
                     const labelR=r+strokeW/2+16;
                     const tx=size/2+labelR*Math.cos(midAngle);
                     const ty=size/2+labelR*Math.sin(midAngle);
-                    const anchor=tx<size/2?"end":"start";
+                    if(tx<size/2) return null;
                     return (
                       <g key={c.id}>
                         <line x1={lx} y1={ly} x2={tx} y2={ty} stroke={c.color} strokeWidth="1" opacity="0.7"/>
-                        <text x={tx+(anchor==="start"?3:-3)} y={ty} textAnchor={anchor} dominantBaseline="middle"
+                        <text x={tx+3} y={ty} textAnchor="start" dominantBaseline="middle"
                           fontSize="9" fontWeight="600" fill={c.color}>{c.name}</text>
                       </g>
                     );
@@ -1987,7 +1987,7 @@ function OtherView({store, setStore}) {
     }
   };
   const aboutRows = [
-    ["版本","v1.1.260515",false],
+    ["版本","v1.1.260515b",false],
     ["製作者","AKiRa",true],
     ["技術","React · Tailwind · PWA",false],
     ["支援幣種","MOP · HKD · CNY · JPY · TWD",false],
