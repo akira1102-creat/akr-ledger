@@ -1,6 +1,6 @@
 // AKR記帳本 Service Worker
 // ⚠️ 每次部署新版本，請遞增 CACHE 版本號，舊快取會在 activate 時自動清除
-const CACHE = "akr-ledger-v75";
+const CACHE = "akr-ledger-v76";
 
 const STATIC_ASSETS = [
   "./manifest.json",
@@ -36,17 +36,17 @@ self.addEventListener("fetch", e => {
   const isSameOrigin = url.origin === location.origin;
   const isHTML = req.destination === "document" || url.pathname.endsWith(".html") || url.pathname === "/" || url.pathname.endsWith("/");
 
-  // ── 同源 HTML：Network-first（確保新版本即時生效）
+  // ── 同源 HTML：Stale-while-revalidate（快取即時回應，背景更新）
   if (isSameOrigin && isHTML) {
     e.respondWith(
-      fetch(req)
-        .then(res => {
-          // 成功從網路取得，更新快取
+      caches.match(req).then(cached => {
+        const fetcher = fetch(req).then(res => {
           const copy = res.clone();
           caches.open(CACHE).then(c => c.put(req, copy)).catch(() => {});
           return res;
-        })
-        .catch(() => caches.match(req).then(hit => hit || caches.match("./index.html")))
+        }).catch(() => cached);
+        return cached || fetcher;
+      })
     );
     return;
   }
