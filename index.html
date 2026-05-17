@@ -1270,7 +1270,7 @@ function HomeView({store, rates, base, entries, onEdit, onDelete, onCopy, monthT
               const bgt=store.budgets?.[c.id]||0;
               const over=bgt>0&&spent>bgt;
               return (
-                <div key={c.id} className={`flex items-center gap-1.5 rounded-xl px-2.5 py-1.5 ${over?"bg-red-50":"bg-gray-50"}`}>
+                <div key={c.id} className={`flex items-center gap-1.5 rounded-xl px-2.5 py-1.5 ${over?"bg-red-50":"bg-gray-50"}`} style={over?{color:'#374151'}:undefined}>
                   <span className="text-base">{c.icon}</span>
                   <div className="flex-1 min-w-0">
                     <div className="text-xs truncate flex items-center gap-1">{c.name}{over&&<span className="text-red-400 text-[9px] font-bold">超支</span>}</div>
@@ -2002,7 +2002,7 @@ function OtherView({store, setStore}) {
     }
   };
   const aboutRows = [
-    ["版本","v1.1.260517b",false],
+    ["版本","v1.1.260517c",false],
     ["製作者","AKiRa",true],
     ["技術","React · Tailwind · PWA",false],
     ["支援幣種","MOP · HKD · CNY · JPY · TWD",false],
