@@ -1084,7 +1084,7 @@ function App() {
 }
 
 /* ===================== 首頁 ===================== */
-function EntryItem({e, cat, base, onEdit, onCopy, onDelete, nd=false}) {
+function EntryItem({e, cat, base, rates, onEdit, onCopy, onDelete, nd=false}) {
   const lp = useLongPress(useCallback(()=>onCopy&&onCopy(e),[e,onCopy]));
   const [swipeX, setSwipeX] = useState(0);
   const [delConfirm, setDelConfirm] = useState(false);
@@ -1122,8 +1122,9 @@ function EntryItem({e, cat, base, onEdit, onCopy, onDelete, nd=false}) {
           <div className="text-sm font-medium truncate">{cat.name}{e.memo?` · ${e.memo}`:""}</div>
           <div className="text-[11px] text-gray-400">{e.currency}{e.currency!==base?" → "+base:""}</div>
         </div>
-        <div className={`text-sm font-semibold amount-font flex-shrink-0 ${e.type==="income"?"text-[color:var(--income)]":"text-[color:var(--expense)]"}`}>
-          {e.type==="income"?"+":"-"}{fmt(e.amount,e.currency,nd)}
+        <div className={`text-sm font-semibold amount-font flex-shrink-0 text-right ${e.type==="income"?"text-[color:var(--income)]":"text-[color:var(--expense)]"}`}>
+          <div>{e.type==="income"?"+":"-"}{fmt(e.amount,e.currency,nd)}</div>
+          {e.currency!==base&&<div className="text-[11px] font-normal text-gray-400">({e.type==="income"?"+":"-"}{fmt(eBase(e,rates,base),base,nd)})</div>}
         </div>
       </div>
     </li>
@@ -1409,7 +1410,7 @@ function HomeView({store, rates, base, entries, onEdit, onDelete, onCopy, monthT
                 <ul>
                   {list.map(e=>{
                     const cat=catMap[e.category]||{icon:"❓",name:"未分類",color:"#ddd"};
-                    return <EntryItem key={e.id} e={e} cat={cat} base={base} onEdit={onEdit} onCopy={onCopy} onDelete={onDelete} nd={nd}/>;
+                    return <EntryItem key={e.id} e={e} cat={cat} base={base} rates={rates} onEdit={onEdit} onCopy={onCopy} onDelete={onDelete} nd={nd}/>;
                   })}
                 </ul>
               </div>
@@ -1516,8 +1517,9 @@ function CalendarView({store, rates, base, viewMonth, entries, onEdit}) {
                   <li key={e.id} onClick={()=>onEdit(e)} className="px-4 py-3 flex items-center gap-3 border-t border-gray-50 active:bg-gray-50">
                     <div className="text-lg">{cat.icon}</div>
                     <div className="flex-1 truncate"><div className="text-sm">{cat.name}{e.memo?` · ${e.memo}`:""}</div></div>
-                    <div className={`text-sm amount-font ${e.type==="income"?"text-[color:var(--income)]":"text-[color:var(--expense)]"}`}>
-                      {e.type==="income"?"+":"-"}{fmt(e.amount,e.currency,nd)}
+                    <div className={`text-sm amount-font text-right ${e.type==="income"?"text-[color:var(--income)]":"text-[color:var(--expense)]"}`}>
+                      <div>{e.type==="income"?"+":"-"}{fmt(e.amount,e.currency,nd)}</div>
+                      {e.currency!==base&&<div className="text-[11px] font-normal text-gray-400">({e.type==="income"?"+":"-"}{fmt(eBase(e,rates,base),base,nd)})</div>}
                     </div>
                   </li>
                 );
@@ -1772,7 +1774,10 @@ function ChartView({store, rates, base, entries, allEntries, viewMonth, onEdit})
                         <div className="text-sm font-medium truncate">{cat.name}{e.memo?` · ${e.memo}`:""}</div>
                         <div className="text-[11px] text-gray-400">{e.date}</div>
                       </div>
-                      <div className="text-sm font-semibold amount-font text-[color:var(--expense)]">-{fmt(e.amount,e.currency,nd)}</div>
+                      <div className="text-sm font-semibold amount-font text-[color:var(--expense)] text-right">
+                        <div>-{fmt(e.amount,e.currency,nd)}</div>
+                        {e.currency!==base&&<div className="text-[11px] font-normal text-gray-400">(-{fmt(eBase(e,rates,base),base,nd)})</div>}
+                      </div>
                     </li>
                   );
                 })}
@@ -2028,7 +2033,7 @@ function OtherView({store, setStore}) {
     }
   };
   const aboutRows = [
-    ["版本","v1.1.260517d",false],
+    ["版本","v1.1.260517e",false],
     ["製作者","AKiRa",true],
     ["技術","React · Tailwind · PWA",false],
     ["支援幣種","MOP · HKD · CNY · JPY · TWD",false],
