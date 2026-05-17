@@ -498,6 +498,8 @@ const saveStore = s => { try { localStorage.setItem(STORE_KEY, JSON.stringify(s)
 
 /* ===================== 金額格式化 ===================== */
 const toBase = (amount, currency, rates, base) => amount * (rates[currency]||1) / (rates[base]||1);
+// Use locked baseAmount if present (set at entry time), else calculate live
+const eBase = (e, rates, base) => e.baseAmount != null ? e.baseAmount : toBase(e.amount, e.currency, rates, base);
 const evalExpr = (expr) => {
   try {
     const s = (expr||"").replace(/×/g,'*').replace(/÷/g,'/').replace(/−/g,'-').replace(/＋/g,'+');
@@ -882,6 +884,28 @@ function App() {
         if(days > 1) new Notification("AKR記帳本 提醒", {body:`你已 ${Math.floor(days)} 日未記帳，記得記低每日支出！`, icon:"./icon-192.png"});
       }
     }
+    // Auto-fetch rates once per day
+    const todayKey = new Date().toISOString().slice(0,10);
+    if(localStorage.getItem("akr-last-rate-date") !== todayKey) {
+      const initS = loadStore();
+      const b = initS.settings.baseCurrency;
+      fetch(`https://open.er-api.com/v6/latest/${b}`)
+        .then(r=>r.json())
+        .then(data=>{
+          if(data.result!=="success") return;
+          setStore(s=>{
+            const r={...s.settings.rates};
+            Object.keys(r).forEach(code=>{
+              if(code===b){r[code]=1;return;}
+              const v=data.rates[code];
+              if(v) r[code]=Math.round((1/v)*10000)/10000;
+            });
+            return {...s,settings:{...s.settings,rates:r}};
+          });
+          localStorage.setItem("akr-last-rate-date",todayKey);
+        })
+        .catch(()=>{});
+    }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -906,7 +930,7 @@ function App() {
   const monthTotals = useMemo(() => {
     let inc=0, exp=0;
     monthEntries.forEach(e => {
-      const v = toBase(e.amount, e.currency, rates, base);
+      const v = eBase(e, rates, base);
       if (e.type==="income") inc+=v; else exp+=v;
     });
     const mNum = parseInt(viewMonth.split("-")[1]);
@@ -1161,12 +1185,14 @@ function HomeView({store, rates, base, entries, onEdit, onDelete, onCopy, monthT
   const nd = store.settings?.noDecimals||false;
   const now = new Date();
   const todayISO = toISO(now);
+  const weekStartSetting = store.settings?.weekStart || "mon";
   const weekStart = new Date(now);
-  weekStart.setDate(now.getDate() - now.getDay());
+  const dow = now.getDay(); // 0=Sun
+  weekStart.setDate(now.getDate() - (weekStartSetting === "sun" ? dow : (dow + 6) % 7));
   const weekStartISO = toISO(weekStart);
 
-  const todayExp = useMemo(()=>entries.filter(e=>e.type==="expense"&&e.date===todayISO).reduce((s,e)=>s+toBase(e.amount,e.currency,rates,base),0),[entries,rates,base,todayISO]);
-  const weekExp  = useMemo(()=>entries.filter(e=>e.type==="expense"&&e.date>=weekStartISO).reduce((s,e)=>s+toBase(e.amount,e.currency,rates,base),0),[entries,rates,base,weekStartISO]);
+  const todayExp = useMemo(()=>entries.filter(e=>e.type==="expense"&&e.date===todayISO).reduce((s,e)=>s+eBase(e,rates,base),0),[entries,rates,base,todayISO]);
+  const weekExp  = useMemo(()=>entries.filter(e=>e.type==="expense"&&e.date>=weekStartISO).reduce((s,e)=>s+eBase(e,rates,base),0),[entries,rates,base,weekStartISO]);
   const monthExp = monthTotals.exp;
   const tb = monthTotals.tb ?? 0;
 
@@ -1198,7 +1224,7 @@ function HomeView({store, rates, base, entries, onEdit, onDelete, onCopy, monthT
     const map={};
     entries.filter(e=>e.type==="expense").forEach(e=>{
       const cat=expCatMap[e.category]; const topId=cat?.parentId||e.category;
-      map[topId]=(map[topId]||0)+toBase(e.amount,e.currency,rates,base);
+      map[topId]=(map[topId]||0)+eBase(e,rates,base);
     });
     return map;
   },[entries,rates,base]);
@@ -1366,7 +1392,7 @@ function HomeView({store, rates, base, entries, onEdit, onDelete, onCopy, monthT
       ):(
         <>
           {visibleGroups.map(([date,list])=>{
-            const daySum=list.reduce((acc,e)=>{const v=toBase(e.amount,e.currency,rates,base);return e.type==="income"?acc+v:acc-v;},0);
+            const daySum=list.reduce((acc,e)=>{const v=eBase(e,rates,base);return e.type==="income"?acc+v:acc-v;},0);
             const d=parseISO(date);
             const diffDays=Math.round((new Date(todayISO)-new Date(date))/86400000);
             const dayLabel=diffDays===0?"今天":diffDays===1?"昨天":null;
@@ -1428,7 +1454,7 @@ function CalendarView({store, rates, base, viewMonth, entries, onEdit}) {
     const map={};
     entries.forEach(e=>{
       if(!map[e.date]) map[e.date]={inc:0,exp:0};
-      const v=toBase(e.amount,e.currency,rates,base);
+      const v=eBase(e,rates,base);
       if(e.type==="income") map[e.date].inc+=v; else map[e.date].exp+=v;
     });
     return map;
@@ -1513,7 +1539,7 @@ function TrendChart({allEntries, base, rates, nd}) {
       const ym=monthKey(d);
       let inc=0,exp=0;
       allEntries.filter(e=>e.date.startsWith(ym)).forEach(e=>{
-        const v=toBase(e.amount,e.currency,rates,base);
+        const v=eBase(e,rates,base);
         if(e.type==="income") inc+=v; else exp+=v;
       });
       return {ym, label:`${d.getMonth()+1}月`, inc, exp};
@@ -1585,7 +1611,7 @@ function ChartView({store, rates, base, entries, allEntries, viewMonth, onEdit})
     const map={};
     rangeEntries.filter(e=>e.type==="expense").forEach(e=>{
       const cat=expCatMap[e.category]; const topId=cat?.parentId||e.category;
-      map[topId]=(map[topId]||0)+toBase(e.amount,e.currency,rates,base);
+      map[topId]=(map[topId]||0)+eBase(e,rates,base);
     });
     return map;
   },[rangeEntries,rates,base]);
@@ -1594,7 +1620,7 @@ function ChartView({store, rates, base, entries, allEntries, viewMonth, onEdit})
     const map={};
     rangeEntries.filter(e=>e.type==="income").forEach(e=>{
       const cat=incCatMap[e.category]; const topId=cat?.parentId||e.category;
-      map[topId]=(map[topId]||0)+toBase(e.amount,e.currency,rates,base);
+      map[topId]=(map[topId]||0)+eBase(e,rates,base);
     });
     return map;
   },[rangeEntries,rates,base]);
@@ -1607,7 +1633,7 @@ function ChartView({store, rates, base, entries, allEntries, viewMonth, onEdit})
     const map={};
     (allEntries||[]).filter(e=>e.type==="expense"&&e.date.startsWith(pm)).forEach(e=>{
       const cat=expCatMap[e.category]; const topId=cat?.parentId||e.category;
-      map[topId]=(map[topId]||0)+toBase(e.amount,e.currency,rates,base);
+      map[topId]=(map[topId]||0)+eBase(e,rates,base);
     });
     return map;
   },[period,viewMonth,allEntries,expCatMap,rates,base]);
@@ -1625,7 +1651,7 @@ function ChartView({store, rates, base, entries, allEntries, viewMonth, onEdit})
       const cat=expCatMap[e.category];
       if((cat?.parentId||e.category)===selectedCatId){
         const cid=cat?.parentId?e.category:selectedCatId;
-        childMap[cid]=(childMap[cid]||0)+toBase(e.amount,e.currency,rates,base);
+        childMap[cid]=(childMap[cid]||0)+eBase(e,rates,base);
       }
     });
     return store.categories.expense
@@ -1729,7 +1755,7 @@ function ChartView({store, rates, base, entries, allEntries, viewMonth, onEdit})
                 </>
               )}
               <span className="text-sm amount-font font-semibold flex-shrink-0" style={{color:"var(--expense)"}}>
-                {fmt(cardEntries.reduce((s,e)=>s+toBase(e.amount,e.currency,rates,base),0),base,nd)}
+                {fmt(cardEntries.reduce((s,e)=>s+eBase(e,rates,base),0),base,nd)}
               </span>
             </div>
             {cardEntries.length===0?(
@@ -2002,7 +2028,7 @@ function OtherView({store, setStore}) {
     }
   };
   const aboutRows = [
-    ["版本","v1.1.260517c",false],
+    ["版本","v1.1.260517d",false],
     ["製作者","AKiRa",true],
     ["技術","React · Tailwind · PWA",false],
     ["支援幣種","MOP · HKD · CNY · JPY · TWD",false],
@@ -2140,7 +2166,7 @@ function ReceiptView({store}) {
     const pTot={}, cTot={};
     exps.forEach(e=>{
       const cat=expCatMap[e.category]; const pid=cat?.parentId||e.category;
-      const amt=toBase(e.amount,e.currency,rates,base);
+      const amt=eBase(e,rates,base);
       pTot[pid]=(pTot[pid]||0)+amt;
       if(cat?.parentId){ if(!cTot[pid]) cTot[pid]={}; cTot[pid][e.category]=(cTot[pid][e.category]||0)+amt; }
     });
@@ -2150,7 +2176,7 @@ function ReceiptView({store}) {
         .map(ch=>({...ch,total:cTot[c.id][ch.id]})).sort((a,b)=>b.total-a.total)}))
       .sort((a,b)=>b.total-a.total);
     const totalExp=cats.reduce((s,c)=>s+c.total,0);
-    const totalInc=incs.reduce((s,e)=>s+toBase(e.amount,e.currency,rates,base),0);
+    const totalInc=incs.reduce((s,e)=>s+eBase(e,rates,base),0);
     return {cats, totalExp, totalInc, count:exps.length+incs.length};
   },[store.entries,store.categories.expense,month,rates,base]);
 
@@ -3028,7 +3054,10 @@ function EntryModal({entry, store, base, rates, onSave, onDelete, onClose, close
     let v = parseFloat(amount);
     if (!v || v<=0 || !category) return;
     if (store.settings?.noDecimals) v = Math.trunc(v);
-    onSave({ id: entry?.id || Date.now()+"_"+Math.random().toString(36).slice(2), type, category, amount:v, currency, date, memo });
+    const entryData = { id: entry?.id || Date.now()+"_"+Math.random().toString(36).slice(2), type, category, amount:v, currency, date, memo };
+    if (currency !== base) entryData.baseAmount = Math.round(toBase(v, currency, rates, base) * 10000) / 10000;
+    else delete entryData.baseAmount;
+    onSave(entryData);
   };
 
   return (
