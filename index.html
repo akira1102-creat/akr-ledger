@@ -1172,34 +1172,32 @@ function App() {
   return (
     <div className="min-h-screen">
       <header className="sticky top-0 z-20 bg-white border-b border-gray-100">
-        {/* ── Gist sync status bar ── */}
-        <div className="px-4 pt-2 pb-1 flex items-center justify-between border-b border-gray-50">
-          <div className="flex items-center gap-1.5 text-xs text-gray-400">
-            {drive.gistToken && drive.gistId ? (
-              drive.syncing ? (
-                <span>☁️ 同步中…</span>
-              ) : drive.syncError ? (
-                <span className="text-amber-500">⚠️ 同步失敗</span>
-              ) : (
-                <>
-                  <span style={{color:"var(--brand)"}}>☁️</span>
-                  <span style={{color:"var(--brand)"}}>已同步</span>
-                  {drive.lastUpload && <span className="text-gray-300">{new Date(drive.lastUpload).toLocaleTimeString("zh-HK",{hour:"2-digit",minute:"2-digit"})}</span>}
-                </>
-              )
-            ) : (
-              <span>☁️ 未啟用同步</span>
-            )}
-          </div>
-          <div className="flex items-center gap-2">
-            {drive.gistToken && drive.gistId && (
-              <>
-                <span className="text-xs text-gray-300">@{drive.gistUser?.login || ""}</span>
-                <button onClick={() => drive.disconnect()} className="text-xs text-gray-400 active:text-gray-600">斷開</button>
-              </>
-            )}
-          </div>
-        </div>
+        {/* ── Sync status bar ── */}
+        {(()=>{
+          const gistOn = !!(drive.gistToken && drive.gistId);
+          const fbOn   = !!fbDrive.fbUser;
+          const syncing = drive.syncing || fbDrive.syncing;
+          const error   = drive.syncError || fbDrive.syncError;
+          const lastUp  = [drive.lastUpload, fbDrive.lastUpload].filter(Boolean).map(d=>new Date(d)).sort((a,b)=>b-a)[0];
+          return (
+            <div className="px-4 pt-2 pb-1 flex items-center justify-between border-b border-gray-50">
+              <div className="flex items-center gap-1.5 text-xs text-gray-400">
+                {syncing ? <span>☁️ 同步中…</span>
+                 : error  ? <span className="text-amber-500">⚠️ 同步失敗</span>
+                 : (gistOn||fbOn) ? <>
+                     <span style={{color:"var(--brand)"}}>☁️</span>
+                     <span style={{color:"var(--brand)"}}>已同步</span>
+                     {lastUp && <span className="text-gray-300">{lastUp.toLocaleTimeString("zh-HK",{hour:"2-digit",minute:"2-digit"})}</span>}
+                   </>
+                 : <span>☁️ 未啟用同步</span>}
+              </div>
+              <div className="flex items-center gap-2">
+                {fbOn && <span className="text-xs text-gray-300 max-w-[100px] truncate">{fbDrive.fbUser.email?.split("@")[0]}</span>}
+                {gistOn && <span className="text-xs text-gray-300">@{drive.gistUser?.login || ""}</span>}
+              </div>
+            </div>
+          );
+        })()}
         {/* ── Month nav / Tab title ── */}
         {tab==="set"||tab==="fun" ? (
           <div className="px-4 py-2 text-center">
@@ -2224,7 +2222,7 @@ function OtherView({store, setStore}) {
     }
   };
   const aboutRows = [
-    ["版本","v1.1.260519",false],
+    ["版本","v1.1.260519b",false],
     ["製作者","AKiRa",true],
     ["技術","React · Tailwind · PWA",false],
     ["支援幣種","MOP · HKD · CNY · JPY · TWD",false],
