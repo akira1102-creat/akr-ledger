@@ -128,279 +128,7 @@ const CURRENCIES = [
 ];
 const DEFAULT_RATES = { MOP: 1, HKD: 1.03, CNY: 1.11, JPY: 0.055, TWD: 0.25 };
 
-// ===================== GitHub Gist Sync =====================
-const GIST_STATE_KEY = "akr-gist-state";
-const GIST_FILENAME  = "akr-ledger.json";
-const GH_API         = "https://api.github.com";
-
-function useGistSync(store, setStore) {
-  const loadSaved = () => { try { return JSON.parse(localStorage.getItem(GIST_STATE_KEY)||"null"); } catch { return null; } };
-  const saved = loadSaved();
-
-  const [gistToken, setGistToken] = useState(saved?.token  || null);
-  const [gistId,    setGistId]    = useState(saved?.gistId || null);
-  const [gistUser,  setGistUser]  = useState(saved?.user   || null);
-  const [lastSync,   setLastSync]   = useState(saved?.lastSync   ? new Date(saved.lastSync)   : null);
-  const [lastUpload, setLastUpload] = useState(saved?.lastUpload ? new Date(saved.lastUpload) : null);
-  const [startupDone, setStartupDone] = useState(false);
-  const [syncing,   setSyncing]   = useState(false);
-  const [syncError, setSyncError] = useState(null);
-
-  const storeRef = useRef(store);
-  useEffect(() => { storeRef.current = store; }, [store]);
-
-  // upload arg: pass the new upload Date when we actually uploaded, omit to preserve current lastUpload
-  const persistState = (tok, id, user, sync, upload) => {
-    try {
-      localStorage.setItem(GIST_STATE_KEY, JSON.stringify({
-        token: tok, gistId: id, user,
-        lastSync:   sync   ? sync.toISOString()   : null,
-        lastUpload: upload !== undefined ? (upload ? upload.toISOString() : null) : (lastUpload ? lastUpload.toISOString() : null),
-      }));
-    } catch(e) {}
-  };
-
-  // ── GitHub API helper ─────────────────────────────────────────────────────
-  const ghFetch = async (path, opts = {}, tok = null) => {
-    const token = tok || gistToken;
-    if (!token) throw new Error("尚未設定 Token");
-    const res = await fetch(GH_API + path, {
-      ...opts,
-      headers: {
-        "Authorization": "token " + token,
-        "Accept": "application/vnd.github.v3+json",
-        "Content-Type": "application/json",
-        ...(opts.headers || {}),
-      },
-    });
-    if (!res.ok) {
-      const errText = await res.text().catch(() => "");
-      if (res.status === 401) {
-        throw new Error("Token 無效或已撤銷，請在設定中斷開並重新連接");
-      }
-      throw new Error("GitHub API " + res.status + ": " + errText.slice(0, 120));
-    }
-    if (res.status === 204) return null;
-    return res.json();
-  };
-
-  // ── Find existing gist ────────────────────────────────────────────────────
-  const findGist = async (tok) => {
-    let page = 1;
-    while (page <= 5) {
-      const list = await ghFetch(`/gists?per_page=100&page=${page}`, {}, tok);
-      if (!list || list.length === 0) break;
-      const found = list.find(g => g.files && g.files[GIST_FILENAME]);
-      if (found) return found.id;
-      if (list.length < 100) break;
-      page++;
-    }
-    return null;
-  };
-
-  // ── Download gist (returns { storeData, syncedAt, gistUpdatedAt }) ────────
-  const downloadGist = async (id, tok) => {
-    const gist = await ghFetch(`/gists/${id}`, {}, tok);
-    const file = gist.files[GIST_FILENAME];
-    if (!file) throw new Error("備份檔案不存在");
-    const content = file.truncated
-      ? await fetch(file.raw_url).then(r => r.text())
-      : file.content;
-    const parsed = JSON.parse(content);
-    const { _cloudSyncedAt, ...storeData } = parsed; // strip metadata
-    return {
-      storeData,
-      syncedAt: _cloudSyncedAt || null,
-      gistUpdatedAt: gist.updated_at || null,
-    };
-  };
-
-  // ── Upload (patch) gist — embeds _cloudSyncedAt for cross-device comparison
-  const uploadGist = async (id, data, tok) => {
-    const payload = { ...data, _cloudSyncedAt: new Date().toISOString() };
-    await ghFetch(`/gists/${id}`, {
-      method: "PATCH",
-      body: JSON.stringify({ files: { [GIST_FILENAME]: { content: JSON.stringify(payload) } } }),
-    }, tok);
-  };
-
-  // ── Create gist ───────────────────────────────────────────────────────────
-  const createGist = async (data, tok) => {
-    const res = await ghFetch("/gists", {
-      method: "POST",
-      body: JSON.stringify({
-        description: "AKR記帳本自動備份",
-        public: false,
-        files: { [GIST_FILENAME]: { content: JSON.stringify({ ...data, _cloudSyncedAt: new Date().toISOString() }) } },
-      }),
-    }, tok);
-    return res.id;
-  };
-
-  // ── Connect: validate token + find/create gist ────────────────────────────
-  const connect = async (token) => {
-    setSyncing(true);
-    setSyncError(null);
-    try {
-      const userRes = await ghFetch("/user", {}, token);
-      const user = { login: userRes.login, name: userRes.name || userRes.login };
-
-      const existingId = await findGist(token);
-
-      if (!existingId) {
-        const newId = await createGist(storeRef.current, token);
-        const now = new Date();
-        setGistToken(token); setGistId(newId); setGistUser(user); setLastSync(now); setLastUpload(now);
-        setStartupDone(true);
-        persistState(token, newId, user, now, now);
-        alert("✅ 已建立雲端備份並啟用自動同步！\n\n換機時輸入同一 Token 即可恢復資料。");
-      } else {
-        const doImport = window.confirm(
-          "發現已有雲端備份資料。\n\n按「確定」→ 導入雲端資料（覆蓋本機）\n按「取消」→ 以本機資料覆蓋雲端"
-        );
-        if (doImport) {
-          const { storeData: cloudData } = await downloadGist(existingId, token);
-          if (!cloudData || !cloudData.entries) throw new Error("雲端資料格式無效");
-          normalizeStore(cloudData);
-          justImportedRef.current = true;
-          setStore(cloudData);
-        } else {
-          await uploadGist(existingId, storeRef.current, token);
-        }
-        const now = new Date();
-        if (!doImport) setLastUpload(now);
-        setGistToken(token); setGistId(existingId); setGistUser(user); setLastSync(now);
-        setStartupDone(true);
-        persistState(token, existingId, user, now, doImport ? lastUpload : now);
-        alert("✅ " + (doImport ? "已導入雲端資料，" : "已上傳本機資料，") + "自動同步已啟用！");
-      }
-    } catch(e) {
-      console.error("Connect error:", e);
-      setSyncError(e.message || "連接失敗");
-      alert("❌ 連接失敗：" + (e.message || "請確認 Token 是否正確，並確認已勾選 gist 權限"));
-    } finally {
-      setSyncing(false);
-    }
-  };
-
-  // ── Disconnect ────────────────────────────────────────────────────────────
-  const disconnect = () => {
-    if (!window.confirm("確定斷開雲端同步？（本機資料保留，雲端備份不刪除）")) return;
-    setGistToken(null); setGistId(null); setGistUser(null);
-    setLastSync(null); setLastUpload(null); setSyncError(null);
-    setStartupDone(false);
-    justImportedRef.current = false;
-    startupJustSyncedRef.current = false;
-    try { localStorage.removeItem(GIST_STATE_KEY); } catch(e) {}
-  };
-
-  // ── Manual sync ───────────────────────────────────────────────────────────
-  const syncNow = async () => {
-    if (!gistToken || !gistId) { alert("尚未連接雲端同步"); return; }
-    setSyncing(true); setSyncError(null);
-    try {
-      await uploadGist(gistId, storeRef.current, gistToken);
-      const now = new Date();
-      setLastSync(now); setLastUpload(now);
-      persistState(gistToken, gistId, gistUser, now, now);
-    } catch(e) {
-      setSyncError(e.message);
-      console.error("SyncNow error:", e);
-    } finally { setSyncing(false); }
-  };
-
-  // ── Refs for sync coordination ────────────────────────────────────────────
-  const justImportedRef      = useRef(false); // skip debounce upload after cloud import
-  const startupJustSyncedRef = useRef(false); // skip debounce upload immediately after startup finishes
-
-  // ── Startup sync (once on mount) ─────────────────────────────────────────
-  // Compare _lastModified (stamped only on entry/budget changes, not uploads).
-  // Whichever device has the newer _lastModified wins entirely — including
-  // deletions and edits. Falls back to _cloudSyncedAt / gist.updated_at
-  // for stores that predate _lastModified.
-  useEffect(() => {
-    if (!gistToken || !gistId) return;
-    let alive = true;
-
-    (async () => {
-      try {
-        setSyncing(true); setSyncError(null);
-
-        const { storeData: cloudData, syncedAt: cloudSyncedAt, gistUpdatedAt } = await downloadGist(gistId, gistToken);
-        if (!alive) return;
-
-        const cloudModMs = dateToMs(cloudData._lastModified)
-          || dateToMs(cloudSyncedAt) || dateToMs(gistUpdatedAt);
-        const localModMs = dateToMs(storeRef.current._lastModified)
-          || dateToMs(saved?.lastSync);
-
-        const cloudIsNewer = cloudModMs > localModMs;
-
-        if (cloudIsNewer) {
-          // ☁️ Cloud is newer — import
-          normalizeStore(cloudData);
-          justImportedRef.current = true;
-          if (alive) setStore(cloudData);
-        } else {
-          // 📱 Local is newest or same — upload
-          if (alive) await uploadGist(gistId, storeRef.current, gistToken);
-        }
-
-        if (alive) {
-          const now = new Date();
-          setLastSync(now);
-          if (!cloudIsNewer) setLastUpload(now);
-          startupJustSyncedRef.current = true;
-          setStartupDone(true);
-          persistState(gistToken, gistId, gistUser, now, cloudIsNewer ? lastUpload : now);
-        }
-      } catch(e) {
-        if (alive) setSyncError(e.message || "啟動同步失敗");
-        console.error("StartupSync error:", e);
-        if (alive) { startupJustSyncedRef.current = true; setStartupDone(true); }
-      } finally {
-        if (alive) setSyncing(false);
-      }
-    })();
-
-    return () => { alive = false; };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps — runs once on mount
-
-  // ── Debounce upload on store changes (after startup completes) ────────────
-  // startupDone is in deps so the effect re-runs when startup finishes,
-  // catching any store changes that were skipped while startup was still running.
-  useEffect(() => {
-    if (!gistToken || !gistId) return;
-    if (!startupDone) return; // wait for startup sync (state, not ref — triggers re-run)
-
-    let cancelled = false;
-    const timer = setTimeout(async () => {
-      if (cancelled) return;
-      if (justImportedRef.current) { justImportedRef.current = false; return; }
-      if (startupJustSyncedRef.current) { startupJustSyncedRef.current = false; return; }
-      try {
-        setSyncing(true); setSyncError(null);
-        await uploadGist(gistId, storeRef.current, gistToken);
-        if (!cancelled) {
-          const now = new Date();
-          setLastSync(now); setLastUpload(now);
-          persistState(gistToken, gistId, gistUser, now, now);
-        }
-      } catch(e) {
-        if (!cancelled) setSyncError(e.message || "同步失敗");
-        console.error("AutoSync error:", e);
-      } finally {
-        if (!cancelled) setSyncing(false);
-      }
-    }, 1500);
-
-    return () => { cancelled = true; clearTimeout(timer); };
-  }, [store, gistToken, gistId, startupDone]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  return { gistToken, gistId, gistUser, lastSync, lastUpload, syncing, syncError, connect, disconnect, syncNow };
-}
-
-/* ===================== Firebase / Google 同步 ===================== */
+/* ===================== Firebase / Google 同步 ===================== *//* ===================== Firebase / Google 同步 ===================== */
 const FB_STATE_KEY = "akr-fb-state";
 
 function useFirebaseSync(store, setStore) {
@@ -1039,7 +767,6 @@ function App() {
   const [entryCloseSignal, setEntryCloseSignal] = useState(0);
   const [editing, setEditing] = useState(null);
   const [viewMonth, setViewMonth] = useState(() => { const d=new Date(); return monthKey(d); });
-  const drive   = useGistSync(store, setStore);
   const fbDrive = useFirebaseSync(store, setStore);
 
   useEffect(() => { saveStore(store); }, [store]);
@@ -1174,26 +901,21 @@ function App() {
       <header className="sticky top-0 z-20 bg-white border-b border-gray-100">
         {/* ── Sync status bar ── */}
         {(()=>{
-          const gistOn = !!(drive.gistToken && drive.gistId);
-          const fbOn   = !!fbDrive.fbUser;
-          const syncing = drive.syncing || fbDrive.syncing;
-          const error   = drive.syncError || fbDrive.syncError;
-          const lastUp  = [drive.lastUpload, fbDrive.lastUpload].filter(Boolean).map(d=>new Date(d)).sort((a,b)=>b-a)[0];
+          const fbOn  = !!fbDrive.fbUser;
           return (
             <div className="px-4 pt-2 pb-1 flex items-center justify-between border-b border-gray-50">
               <div className="flex items-center gap-1.5 text-xs text-gray-400">
-                {syncing ? <span>☁️ 同步中…</span>
-                 : error  ? <span className="text-amber-500">⚠️ 同步失敗</span>
-                 : (gistOn||fbOn) ? <>
+                {fbDrive.syncing ? <span>☁️ 同步中…</span>
+                 : fbDrive.syncError ? <span className="text-amber-500">⚠️ 同步失敗</span>
+                 : fbOn ? <>
                      <span style={{color:"var(--brand)"}}>☁️</span>
                      <span style={{color:"var(--brand)"}}>已同步</span>
-                     {lastUp && <span className="text-gray-300">{lastUp.toLocaleTimeString("zh-HK",{hour:"2-digit",minute:"2-digit"})}</span>}
+                     {fbDrive.lastUpload && <span className="text-gray-300">{new Date(fbDrive.lastUpload).toLocaleTimeString("zh-HK",{hour:"2-digit",minute:"2-digit"})}</span>}
                    </>
                  : <span>☁️ 未啟用同步</span>}
               </div>
               <div className="flex items-center gap-2">
                 {fbOn && <span className="text-xs text-gray-300 max-w-[100px] truncate">{fbDrive.fbUser.email?.split("@")[0]}</span>}
-                {gistOn && <span className="text-xs text-gray-300">@{drive.gistUser?.login || ""}</span>}
               </div>
             </div>
           );
@@ -1229,7 +951,7 @@ function App() {
                 {t==="cal"   && <CalendarView store={store} rates={rates} base={base} viewMonth={viewMonth} entries={monthEntries} onEdit={openEdit}/>}
                 {t==="chart" && <ChartView store={store} rates={rates} base={base} entries={monthEntries} allEntries={store.entries} viewMonth={viewMonth} onEdit={openEdit}/>}
                 {t==="fun"   && <FunView store={store}/>}
-                {t==="set"   && <SettingsView store={store} setStore={setStore} drive={drive} fbDrive={fbDrive}/>}
+                {t==="set"   && <SettingsView store={store} setStore={setStore} fbDrive={fbDrive}/>}
               </>
             )}
           </div>
@@ -2222,7 +1944,7 @@ function OtherView({store, setStore}) {
     }
   };
   const aboutRows = [
-    ["版本","v1.1.260519b",false],
+    ["版本","v1.1.260519c",false],
     ["製作者","AKiRa",true],
     ["技術","React · Tailwind · PWA",false],
     ["支援幣種","MOP · HKD · CNY · JPY · TWD",false],
@@ -2536,7 +2258,7 @@ function ReceiptView({store}) {
   );
 }
 
-function SettingsView({store, setStore, drive, fbDrive}) {
+function SettingsView({store, setStore, fbDrive}) {
   const [tab, setTab] = useState(null);
   useEffect(()=>{
     if(tab){ setLayer('settingsTab', ()=>setTab(null)); }
@@ -2582,7 +2304,7 @@ function SettingsView({store, setStore, drive, fbDrive}) {
         {tab==="layout" && <LayoutSettings store={store} setStore={setStore}/>}
         {tab==="cat"    && <CatSettings store={store} setStore={setStore}/>}
         {tab==="budget" && <BudgetSettings store={store} setStore={setStore}/>}
-        {tab==="data"   && <DataSettings store={store} setStore={setStore} drive={drive} fbDrive={fbDrive}/>}
+        {tab==="data"   && <DataSettings store={store} setStore={setStore} fbDrive={fbDrive}/>}
         {tab==="basic"  && <BasicSettings store={store} setStore={setStore}/>}
         {tab==="other"  && <OtherView store={store} setStore={setStore}/>}
       </div>
@@ -2960,80 +2682,6 @@ function ConfirmDialog({open, title, message, onConfirm, onCancel, confirmLabel=
   );
 }
 
-/* ── GitHub Gist 同步面板 ── */
-function GistConnect({ onConnect, syncing }) {
-  const [tok, setTok] = useState("");
-  return (
-    <div className="space-y-2">
-      <div className="flex gap-2">
-        <input
-          type="password"
-          value={tok}
-          onChange={e => setTok(e.target.value)}
-          placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
-          className="flex-1 px-3 py-2.5 text-xs border border-gray-200 rounded-xl focus:outline-none focus:border-pink-300"
-        />
-        <button
-          onClick={() => tok.trim() && onConnect(tok.trim())}
-          disabled={!tok.trim() || syncing}
-          className="px-4 py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-50 active:opacity-80"
-          style={{background:"var(--brand)"}}>
-          {syncing ? "⏳" : "連接"}
-        </button>
-      </div>
-      <a
-        href="https://github.com/settings/tokens/new?scopes=gist&description=AKR%E8%A8%98%E5%B8%B3%E6%9C%AC"
-        target="_blank" rel="noopener noreferrer"
-        className="block text-center text-xs text-blue-400 underline py-1">
-        📋 點此前往 GitHub 生成 Token（只需勾選 gist 權限）
-      </a>
-    </div>
-  );
-}
-
-function GistSyncPanel({ drive, dataModified }) {
-  const connected = !!(drive.gistToken && drive.gistId);
-  return (
-    <div className="bg-white rounded-2xl shadow-sm p-4 space-y-3">
-      <div className="text-sm font-semibold">☁️ 雲端同步（GitHub Gist）</div>
-      {connected ? (
-        <>
-          <div className="flex items-center gap-2 text-xs bg-green-50 text-green-700 px-3 py-2.5 rounded-xl">
-            <span>✅ 已連接</span>
-            <span className="text-green-500 font-medium">@{drive.gistUser?.login}</span>
-          </div>
-          {drive.syncError && (
-            <div className="text-xs text-amber-600 bg-amber-50 px-3 py-2 rounded-xl">⚠️ {drive.syncError}</div>
-          )}
-          {drive.lastUpload && (
-            <div className="text-xs text-gray-400">最後上傳：{new Date(drive.lastUpload).toLocaleString("zh-HK")}</div>
-          )}
-          {dataModified && (
-            <div className="text-xs text-gray-400">資料更新至：{new Date(dataModified).toLocaleString("zh-HK")}</div>
-          )}
-          <button onClick={drive.syncNow} disabled={drive.syncing}
-            className="w-full py-2.5 rounded-xl text-sm font-semibold disabled:opacity-50 active:opacity-80"
-            style={{color:"var(--brand)", background:"var(--brand-soft)"}}>
-            {drive.syncing ? "同步中…" : "🔄 立即同步"}
-          </button>
-          <button onClick={drive.disconnect}
-            className="w-full py-2 rounded-xl text-xs text-gray-400 bg-gray-50 active:opacity-80">
-            斷開連接
-          </button>
-        </>
-      ) : (
-        <>
-          <div className="text-xs text-gray-400 leading-relaxed">
-            使用 GitHub Personal Access Token 同步資料，無需 OAuth 授權彈窗，永久有效。<br/>
-            換機時輸入同一個 Token 即可一鍵恢復所有資料。
-          </div>
-          <GistConnect onConnect={drive.connect} syncing={drive.syncing} />
-        </>
-      )}
-    </div>
-  );
-}
-
 function FirebaseSyncPanel({ fbDrive, dataModified }) {
   const connected = !!fbDrive.fbUser;
   return (
@@ -3081,7 +2729,7 @@ function FirebaseSyncPanel({ fbDrive, dataModified }) {
   );
 }
 
-function DataSettings({store, setStore, drive, fbDrive}) {
+function DataSettings({store, setStore, fbDrive}) {
   const [msg, setMsg] = useState("");
   const [dialog, setDialog] = useState(null); // {title, message, onConfirm, danger}
   const flash = (m, isErr=false) => { setMsg({text:m, err:isErr}); setTimeout(()=>setMsg(null),3000); };
@@ -3167,7 +2815,6 @@ function DataSettings({store, setStore, drive, fbDrive}) {
     />
     <div className="space-y-3">
       {msg&&<div className={`text-sm px-4 py-3 rounded-2xl text-center font-medium ${msg.err?"bg-red-50 text-red-600":"bg-green-50 text-green-700"}`}>{msg.text}</div>}
-      <GistSyncPanel drive={drive} dataModified={store._lastModified} />
       <FirebaseSyncPanel fbDrive={fbDrive} dataModified={store._lastModified} />
 
       <div className="bg-white rounded-2xl shadow-sm p-4 space-y-3">
