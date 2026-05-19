@@ -1944,7 +1944,7 @@ function OtherView({store, setStore}) {
     }
   };
   const aboutRows = [
-    ["版本","v1.1.260519c",false],
+    ["版本","v1.1.260519d",false],
     ["製作者","AKiRa",true],
     ["技術","React · Tailwind · PWA",false],
     ["支援幣種","MOP · HKD · CNY · JPY · TWD",false],
@@ -2686,7 +2686,7 @@ function FirebaseSyncPanel({ fbDrive, dataModified }) {
   const connected = !!fbDrive.fbUser;
   return (
     <div className="bg-white rounded-2xl shadow-sm p-4 space-y-3">
-      <div className="text-sm font-semibold">🔥 雲端同步（Google 帳號）</div>
+      <div className="text-sm font-semibold">☁️ 雲端同步（Google 帳號）</div>
       {connected ? (
         <>
           <div className="flex items-center gap-2 text-xs bg-green-50 text-green-700 px-3 py-2.5 rounded-xl">
@@ -2698,10 +2698,10 @@ function FirebaseSyncPanel({ fbDrive, dataModified }) {
             <div className="text-xs text-amber-600 bg-amber-50 px-3 py-2 rounded-xl">⚠️ {fbDrive.syncError}</div>
           )}
           {fbDrive.lastUpload && (
-            <div className="text-xs text-gray-400">最後上傳：{new Date(fbDrive.lastUpload).toLocaleString("zh-HK")}</div>
+            <div className="text-xs text-gray-400">最後上傳：{new Date(fbDrive.lastUpload).toLocaleString("zh-HK",{year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hour12:true})}</div>
           )}
           {dataModified && (
-            <div className="text-xs text-gray-400">資料更新至：{new Date(dataModified).toLocaleString("zh-HK")}</div>
+            <div className="text-xs text-gray-400">資料更新至：{new Date(dataModified).toLocaleString("zh-HK",{year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hour12:true})}</div>
           )}
           <button onClick={fbDrive.syncNow} disabled={fbDrive.syncing}
             className="w-full py-2.5 rounded-xl text-sm font-semibold disabled:opacity-50 active:opacity-80"
