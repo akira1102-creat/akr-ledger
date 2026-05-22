@@ -1095,12 +1095,25 @@ function MiniDonut({topP,topCatMap,total,base,nd}) {
 
 function HomeView({store, rates, base, entries, onEdit, onDelete, onCopy, monthTotals, viewMonth}) {
   const nd = store.settings?.noDecimals||false;
-  const now = new Date();
-  const todayISO = toISO(now);
+
+  // 今日：每日午夜自動更新
+  const [todayISO, setTodayISO] = useState(() => toISO(new Date()));
+  useEffect(() => {
+    const schedule = () => {
+      const n = new Date();
+      const midnight = new Date(n.getFullYear(), n.getMonth(), n.getDate() + 1);
+      return setTimeout(() => setTodayISO(toISO(new Date())), midnight - n + 100);
+    };
+    const t = schedule();
+    return () => clearTimeout(t);
+  }, [todayISO]);
+
+  const now = new Date(todayISO);
   const weekStartSetting = store.settings?.weekStart || "mon";
   const weekStart = new Date(now);
   const dow = now.getDay(); // 0=Sun
   weekStart.setDate(now.getDate() - (weekStartSetting === "sun" ? dow : (dow + 6) % 7));
+  // 本週：每週首日午夜自動更新（todayISO 更新時 weekStartISO 跟著重算）
   const weekStartISO = toISO(weekStart);
 
   const todayExp = useMemo(()=>entries.filter(e=>e.type==="expense"&&e.date===todayISO).reduce((s,e)=>s+eBase(e,rates,base),0),[entries,rates,base,todayISO]);
@@ -1944,7 +1957,7 @@ function OtherView({store, setStore}) {
     }
   };
   const aboutRows = [
-    ["版本","v1.1.260519d",false],
+    ["版本","v1.1.260519e",false],
     ["製作者","AKiRa",true],
     ["技術","React · Tailwind · PWA",false],
     ["支援幣種","MOP · HKD · CNY · JPY · TWD",false],
