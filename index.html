@@ -83,9 +83,6 @@
   @keyframes slideInBottom { from { transform:translateY(100%); opacity:0; } to { transform:translateY(0); opacity:1; } }
   .sheet-bottom { animation: slideInBottom .28s cubic-bezier(.32,.72,0,1); }
 </style>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js" defer></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js" defer></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js" defer></script>
 <script>
   (function(){
     var t = localStorage.getItem("akr-theme") || "system";
@@ -96,25 +93,6 @@
       if(localStorage.getItem("akr-theme")==="system")
         document.documentElement.classList.toggle("dark",e.matches);
     });
-  })();
-</script>
-<script>
-  // Firebase init — runs after defer scripts finish (polls until firebase global is ready)
-  (function tryInit() {
-    if (typeof firebase === "undefined") { setTimeout(tryInit, 50); return; }
-    try {
-      const _fbApp = firebase.initializeApp({
-        apiKey: "AIzaSyCoAVgCDo1vh-YI3IWv7nm5nVav7hdqjoc",
-        authDomain: "akira-project-508eb.firebaseapp.com",
-        projectId: "akira-project-508eb",
-        storageBucket: "akira-project-508eb.firebasestorage.app",
-        messagingSenderId: "19932489246",
-        appId: "1:19932489246:web:46ad2fd86929eb4ba5700f",
-      });
-      window._fbAuth = firebase.auth(_fbApp);
-      window._fbDb   = firebase.firestore(_fbApp);
-      window.dispatchEvent(new CustomEvent("firebase-ready"));
-    } catch(e) { console.warn("Firebase init failed:", e); }
   })();
 </script>
 </head>
@@ -135,12 +113,41 @@ const DEFAULT_RATES = { MOP: 1, HKD: 1.03, CNY: 1.11, JPY: 0.055, TWD: 0.25 };
 
 /* ===================== Firebase / Google 同步 ===================== */
 const FB_STATE_KEY = "akr-fb-state";
+const FB_CDN = "https://www.gstatic.com/firebasejs/10.12.2";
+const FB_CONFIG = {
+  apiKey: "AIzaSyCoAVgCDo1vh-YI3IWv7nm5nVav7hdqjoc",
+  authDomain: "akira-project-508eb.firebaseapp.com",
+  projectId: "akira-project-508eb",
+  storageBucket: "akira-project-508eb.firebasestorage.app",
+  messagingSenderId: "19932489246",
+  appId: "1:19932489246:web:46ad2fd86929eb4ba5700f",
+};
+
+// Dynamically load Firebase scripts only when needed (keeps initial render fast)
+let _fbPromise = null;
+const loadFirebase = () => {
+  if (_fbPromise) return _fbPromise;
+  _fbPromise = (async () => {
+    if (window._fbDb) return;
+    const loadScript = src => new Promise((res, rej) => {
+      const s = document.createElement("script");
+      s.src = src; s.onload = res; s.onerror = rej;
+      document.head.appendChild(s);
+    });
+    await loadScript(FB_CDN + "/firebase-app-compat.js");
+    await loadScript(FB_CDN + "/firebase-auth-compat.js");
+    await loadScript(FB_CDN + "/firebase-firestore-compat.js");
+    const app = firebase.initializeApp(FB_CONFIG);
+    window._fbAuth = firebase.auth(app);
+    window._fbDb   = firebase.firestore(app);
+  })();
+  return _fbPromise;
+};
 
 function useFirebaseSync(store, setStore) {
   const loadSaved = () => { try { return JSON.parse(localStorage.getItem(FB_STATE_KEY)||"null"); } catch { return null; } };
   const saved = loadSaved();
 
-  const [fbReady,    setFbReady]    = useState(!!window._fbDb);
   const [fbUser,     setFbUser]     = useState(saved?.user       || null);
   const [lastSync,   setLastSync]   = useState(saved?.lastSync   ? new Date(saved.lastSync)   : null);
   const [lastUpload, setLastUpload] = useState(saved?.lastUpload ? new Date(saved.lastUpload) : null);
@@ -150,15 +157,6 @@ function useFirebaseSync(store, setStore) {
 
   const storeRef = useRef(store);
   useEffect(() => { storeRef.current = store; }, [store]);
-
-  // Listen for Firebase to become ready (defer-loaded scripts)
-  useEffect(() => {
-    if (fbReady) return;
-    const handler = () => setFbReady(true);
-    window.addEventListener("firebase-ready", handler);
-    if (window._fbDb) setFbReady(true); // already ready
-    return () => window.removeEventListener("firebase-ready", handler);
-  }, [fbReady]);
 
   const persistState = (user, sync, upload) => {
     try {
@@ -187,9 +185,9 @@ function useFirebaseSync(store, setStore) {
   const startupJustSyncedRef = useRef(false);
 
   const connect = async () => {
-    if (!window._fbAuth) { alert("❌ Firebase 未初始化"); return; }
     setSyncing(true); setSyncError(null);
     try {
+      await loadFirebase();
       const provider = new firebase.auth.GoogleAuthProvider();
       const result   = await window._fbAuth.signInWithPopup(provider);
       const user = { uid: result.user.uid, displayName: result.user.displayName, email: result.user.email, photoURL: result.user.photoURL };
@@ -243,6 +241,7 @@ function useFirebaseSync(store, setStore) {
     if (!fbUser) { alert("尚未連接 Google 同步"); return; }
     setSyncing(true); setSyncError(null);
     try {
+      await loadFirebase();
       await uploadFb(fbUser.uid, storeRef.current);
       const now = new Date();
       setLastSync(now); setLastUpload(now);
@@ -252,15 +251,16 @@ function useFirebaseSync(store, setStore) {
     } finally { setSyncing(false); }
   };
 
-  // ── Startup sync — runs once when both fbUser and fbReady are set ────────
+  // ── Startup sync — loads Firebase then syncs once on mount ──────────────
   const startupRanRef = useRef(false);
   useEffect(() => {
-    if (!fbUser || !fbReady || startupRanRef.current) return;
+    if (!fbUser || startupRanRef.current) return;
     startupRanRef.current = true;
     let alive = true;
     (async () => {
       try {
         setSyncing(true); setSyncError(null);
+        await loadFirebase();
         const { storeData: cloudData, syncedAt: cloudSyncedAt } = await downloadFb(fbUser.uid);
         if (!alive) return;
 
@@ -295,11 +295,11 @@ function useFirebaseSync(store, setStore) {
       } finally { if (alive) setSyncing(false); }
     })();
     return () => { alive = false; };
-  }, [fbReady]); // eslint-disable-line react-hooks/exhaustive-deps — re-runs when Firebase becomes ready
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Debounce upload ───────────────────────────────────────────────────────
   useEffect(() => {
-    if (!fbUser || !fbReady) return;
+    if (!fbUser) return;
     if (!startupDone) return;
     let cancelled = false;
     const timer = setTimeout(async () => {
@@ -307,6 +307,7 @@ function useFirebaseSync(store, setStore) {
       if (startupJustSyncedRef.current) { startupJustSyncedRef.current = false; return; }
       try {
         setSyncing(true); setSyncError(null);
+        await loadFirebase();
         await uploadFb(fbUser.uid, storeRef.current);
         if (!cancelled) { const now=new Date(); setLastSync(now); setLastUpload(now); persistState(fbUser,now,now); }
       } catch(e) { if (!cancelled) setSyncError(e.message || "同步失敗"); }
@@ -1974,7 +1975,7 @@ function OtherView({store, setStore}) {
     }
   };
   const aboutRows = [
-    ["版本","v1.1.260522",false],
+    ["版本","v1.1.260522b",false],
     ["製作者","AKiRa",true],
     ["技術","React · Tailwind · PWA",false],
     ["支援幣種","MOP · HKD · CNY · JPY · TWD",false],
