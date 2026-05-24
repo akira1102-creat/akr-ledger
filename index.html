@@ -1152,9 +1152,22 @@ function HomeView({store, rates, base, entries, onEdit, onDelete, onCopy, monthT
   const dayAllowance = tb > 0 && remainingDays > 0 ? remainingBudget / remainingDays : 0;
   const dayBudget    = tb > 0 ? tb / daysInMonth : 0;
   // 本週天數（固定）
-  const weekDays   = Math.min(weekStart.getDate() + 6, daysInMonth) - weekStart.getDate() + 1;
-  // 本週預算 = 月預算 × 週天數 ÷ 月天數（週首日計算，整週不動）
-  const weekBudget = dayBudget * weekDays;
+  const weekDays = Math.min(weekStart.getDate() + 6, daysInMonth) - weekStart.getDate() + 1;
+  // 本週預算：週首日快照（剩餘預算 ÷ 剩餘星期數），整週不動
+  const weekBudget = useMemo(() => {
+    if (tb <= 0) return 0;
+    const KEY = "akr-week-snap";
+    try {
+      const snap = JSON.parse(localStorage.getItem(KEY) || "null");
+      if (snap && snap.weekStart === weekStartISO) return snap.amount;
+    } catch {}
+    // 剩餘星期數 = 從本週首日到月底共幾個完整/不完整週
+    const daysToMonthEnd = daysInMonth - weekStart.getDate() + 1;
+    const rWeeks = Math.max(1, Math.ceil(daysToMonthEnd / 7));
+    const amount = remainingBudget / rWeeks;
+    try { localStorage.setItem(KEY, JSON.stringify({ weekStart: weekStartISO, amount })); } catch {}
+    return amount;
+  }, [weekStartISO, tb]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const expCatMap = store.categories.expense.reduce((a,c)=>{a[c.id]=c;return a;},{});
   const catMap = [...store.categories.expense,...store.categories.income].reduce((a,c)=>{a[c.id]=c;return a;},{});
@@ -1971,7 +1984,7 @@ function OtherView({store, setStore}) {
     }
   };
   const aboutRows = [
-    ["版本","v1.1.260523",false],
+    ["版本","v1.1.260524",false],
     ["製作者","AKiRa",true],
     ["技術","React · Tailwind · PWA",false],
     ["支援幣種","MOP · HKD · CNY · JPY · TWD",false],
