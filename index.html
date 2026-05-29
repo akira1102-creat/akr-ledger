@@ -113,6 +113,7 @@ const DEFAULT_RATES = { MOP: 1, HKD: 1.03, CNY: 1.11, JPY: 0.055, TWD: 0.25 };
 
 /* ===================== Firebase / Google 同步 ===================== */
 const FB_STATE_KEY = "akr-fb-state";
+const FB_REDIRECT_KEY = "akr-fb-redirect-pending";
 const FB_CDN = "https://www.gstatic.com/firebasejs/10.12.2";
 const FB_CONFIG = {
   apiKey: "AIzaSyCoAVgCDo1vh-YI3IWv7nm5nVav7hdqjoc",
@@ -148,7 +149,7 @@ function useFirebaseSync(store, setStore) {
   const loadSaved = () => { try { return JSON.parse(localStorage.getItem(FB_STATE_KEY)||"null"); } catch { return null; } };
   const saved = loadSaved();
 
-  const [fbUser,     setFbUser]     = useState(saved?.user       || null);
+  const [fbUser,     setFbUser]     = useState(null);
   const [lastSync,   setLastSync]   = useState(saved?.lastSync   ? new Date(saved.lastSync)   : null);
   const [lastUpload, setLastUpload] = useState(saved?.lastUpload ? new Date(saved.lastUpload) : null);
   const [startupDone, setStartupDone] = useState(false);
@@ -168,6 +169,13 @@ function useFirebaseSync(store, setStore) {
     } catch(e) {}
   };
 
+  const toFbUser = (user) => user ? {
+    uid: user.uid,
+    displayName: user.displayName,
+    email: user.email,
+    photoURL: user.photoURL,
+  } : null;
+
   const docRef = (uid) => window._fbDb.collection("akr_ledger").doc(uid);
 
   const downloadFb = async (uid) => {
@@ -184,13 +192,59 @@ function useFirebaseSync(store, setStore) {
   const justImportedRef      = useRef(false);
   const startupJustSyncedRef = useRef(false);
 
+  useEffect(() => {
+    const shouldRestore = !!saved?.user || localStorage.getItem(FB_REDIRECT_KEY) === "1";
+    if (!shouldRestore) return;
+
+    let alive = true;
+    let unsubscribe = null;
+    (async () => {
+      try {
+        await loadFirebase();
+        await window._fbAuth.getRedirectResult().catch(e => {
+          if (alive) setSyncError(e.message || "Google redirect 登入失敗");
+        });
+        if (!alive) return;
+        unsubscribe = window._fbAuth.onAuthStateChanged(user => {
+          if (!alive) return;
+          try { localStorage.removeItem(FB_REDIRECT_KEY); } catch(e) {}
+          const nextUser = toFbUser(user);
+          setFbUser(nextUser);
+          if (nextUser) {
+            persistState(nextUser, lastSync, lastUpload);
+          } else if (saved?.user) {
+            try { localStorage.removeItem(FB_STATE_KEY); } catch(e) {}
+            setSyncError("Google 登入已失效，請重新登入");
+          }
+        });
+      } catch(e) {
+        if (alive) setSyncError(e.message || "Google 登入狀態恢復失敗");
+      }
+    })();
+
+    return () => {
+      alive = false;
+      if (unsubscribe) unsubscribe();
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   const connect = async () => {
     setSyncing(true); setSyncError(null);
     try {
       await loadFirebase();
       const provider = new firebase.auth.GoogleAuthProvider();
-      const result   = await window._fbAuth.signInWithPopup(provider);
-      const user = { uid: result.user.uid, displayName: result.user.displayName, email: result.user.email, photoURL: result.user.photoURL };
+      let result;
+      try {
+        result = await window._fbAuth.signInWithPopup(provider);
+      } catch(e) {
+        if (["auth/popup-blocked", "auth/operation-not-supported-in-this-environment", "auth/cancelled-popup-request"].includes(e.code)) {
+          try { localStorage.setItem(FB_REDIRECT_KEY, "1"); } catch(err) {}
+          await window._fbAuth.signInWithRedirect(provider);
+          return;
+        }
+        throw e;
+      }
+      const user = toFbUser(result.user);
 
       const { storeData: cloudData } = await downloadFb(user.uid);
 
@@ -254,8 +308,13 @@ function useFirebaseSync(store, setStore) {
   // ── Startup sync — loads Firebase then syncs once on mount ──────────────
   const startupRanRef = useRef(false);
   useEffect(() => {
-    if (!fbUser || startupRanRef.current) return;
-    startupRanRef.current = true;
+    if (!fbUser) {
+      startupRanRef.current = false;
+      setStartupDone(false);
+      return;
+    }
+    if (startupRanRef.current === fbUser.uid) return;
+    startupRanRef.current = fbUser.uid;
     let alive = true;
     (async () => {
       try {
@@ -295,7 +354,7 @@ function useFirebaseSync(store, setStore) {
       } finally { if (alive) setSyncing(false); }
     })();
     return () => { alive = false; };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [fbUser?.uid]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Debounce upload ───────────────────────────────────────────────────────
   useEffect(() => {
@@ -836,7 +895,7 @@ function App() {
               const v=data.rates[code];
               if(v) r[code]=Math.round((1/v)*10000)/10000;
             });
-            return {...s,settings:{...s.settings,rates:r}};
+            return {...s,settings:{...s.settings,rates:r}, _lastModified:new Date().toISOString()};
           });
           localStorage.setItem("akr-last-rate-date",todayKey);
         })
@@ -1990,9 +2049,9 @@ function OtherView({store, setStore}) {
     ["支援幣種","MOP · HKD · CNY · JPY · TWD",false],
   ];
   const noDecimals = store?.settings?.noDecimals||false;
-  const toggleNoDecimals = () => setStore(s=>({...s, settings:{...s.settings, noDecimals:!s.settings?.noDecimals}}));
+  const toggleNoDecimals = () => setStore(s=>({...s, settings:{...s.settings, noDecimals:!s.settings?.noDecimals}, _lastModified:new Date().toISOString()}));
   const weekStart = store?.settings?.weekStart||"mon";
-  const setWeekStart = v => setStore(s=>({...s, settings:{...s.settings, weekStart:v}}));
+  const setWeekStart = v => setStore(s=>({...s, settings:{...s.settings, weekStart:v}, _lastModified:new Date().toISOString()}));
 
   return (
     <div className="space-y-3">
@@ -2397,6 +2456,7 @@ function BasicSettings({store, setStore}) {
         totalBudget: newTotalBudget,
         budgets: newBudgets,
         settings: { ...s.settings, baseCurrency: newBase, rates: newRates },
+        _lastModified: new Date().toISOString(),
       };
     });
   };
@@ -2414,7 +2474,7 @@ function BasicSettings({store, setStore}) {
         const r = data.rates[c.code];
         if (r) newRates[c.code] = Math.round((1/r) * 10000) / 10000;
       });
-      setStore(s=>({...s, settings:{...s.settings, rates:newRates}}));
+      setStore(s=>({...s, settings:{...s.settings, rates:newRates}, _lastModified:new Date().toISOString()}));
       setRateMsg("✅ 匯率已更新（" + new Date().toLocaleTimeString("zh-HK") + "）");
     } catch(e) {
       setRateMsg("❌ 同步失敗：" + e.message);

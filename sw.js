@@ -1,6 +1,6 @@
 // AKR記帳本 Service Worker
 // ⚠️ 每次部署新版本，請遞增 CACHE 版本號，舊快取會在 activate 時自動清除
-const CACHE = "akr-ledger-v90";
+const CACHE = "akr-ledger-v91";
 
 const STATIC_ASSETS = [
   "./manifest.json",
@@ -8,6 +8,12 @@ const STATIC_ASSETS = [
   "./icon-192.png",
   "./icon-512.png",
 ];
+
+const CDN_CACHE_HOSTS = new Set([
+  "unpkg.com",
+  "cdn.tailwindcss.com",
+  "www.gstatic.com",
+]);
 
 // ── Install：預快取靜態資源（不含 index.html，讓它走 network-first）
 self.addEventListener("install", e => {
@@ -66,7 +72,11 @@ self.addEventListener("fetch", e => {
     return;
   }
 
-  // ── CDN 資源（React, Tailwind, Babel 等）：Stale-while-revalidate
+  if (!CDN_CACHE_HOSTS.has(url.hostname)) {
+    return;
+  }
+
+  // ── allowlisted CDN 資源（React, Tailwind, Babel, Firebase SDK）：Stale-while-revalidate
   e.respondWith(
     caches.match(req).then(hit => {
       const fetcher = fetch(req).then(res => {
