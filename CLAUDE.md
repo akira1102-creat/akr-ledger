@@ -16,8 +16,8 @@
 
 **AKR Ledger** — Zaim-style Cantonese PWA expense tracker. Owner: Akira.
 
-- Single file: all logic in `index.html` (~2000 lines). No build tool, no npm.
-- Stack: React 18 UMD + Babel Standalone + Tailwind CSS Play CDN
+- Vite app: entry in `index.html`, logic in `src/main.jsx`, CSS in `src/styles.css`.
+- Stack: React 18 + Vite + Tailwind CSS
 - Deploy: GitHub Pages at `https://akira1102-creat.github.io/akr-ledger/`
 - **After EVERY edit to `index.html` or `sw.js`: bump `sw.js` cache version** (line 3, e.g. `akr-ledger-v37` → `v38`). Do this before finishing any change, not just on deploy.
 
@@ -29,14 +29,14 @@ python -m http.server 8080
 
 ## Deploy
 
-After every change to `index.html` or `sw.js`:
+After every change to app code, built/cached assets, or `sw.js`:
 1. Bump `sw.js` cache version (line 3)
 2. Update `## SW Cache` version in this file
-3. Update app version in `index.html`: search `"版本","v1.0.` → update date to `yymmdd` format (e.g. `v1.0.260511`)
+3. Update app version in `src/main.jsx`: search `"版本","v1.1.` → update date to `yymmdd` format (e.g. `v1.1.260530`)
 4. Commit and push:
 
 ```bash
-git add index.html sw.js
+git add .
 git commit -m "description"
 git push origin master
 ```
@@ -65,7 +65,7 @@ GitHub Pages auto-deploys from `master` branch to `https://akira1102-creat.githu
 
 **Categories:** parent `{ id, name, icon, color }`, child adds `parentId`. Charts/budgets use parents only; entry `category` stores child id (or parent if no children).
 
-## Components (all in `index.html`)
+## Components (in `src/main.jsx`)
 
 | Component | Role |
 |---|---|
@@ -102,7 +102,7 @@ No OAuth — PAT stored in localStorage.
 --brand: #FF6B8A; --brand-soft: #FFF0F3; --income: #2ECC71; --expense: #E74C3C;
 ```
 
-## SW Cache (`sw.js`) — current: `akr-ledger-v68`
+## SW Cache (`sw.js`) — current: `akr-ledger-v95`
 
 HTML: network-first · static: cache-first · CDN: stale-while-revalidate
 

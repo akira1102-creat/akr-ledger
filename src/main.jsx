@@ -2011,7 +2011,7 @@ function OtherView({store, setStore}) {
     }
   };
   const aboutRows = [
-    ["版本","v1.1.260529",false],
+    ["版本","v1.1.260530",false],
     ["製作者","AKiRa",true],
     ["技術","React · Tailwind · PWA",false],
     ["支援幣種","MOP · HKD · CNY · JPY · TWD",false],
