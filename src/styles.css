@@ -1,0 +1,73 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+    --brand: #FF6B8A;
+    --brand-soft: #FFF0F3;
+    --brand-from: #FF8FA3;
+    --brand-to: #FF6B8A;
+    --brand-glow: rgba(255,107,138,0.5);
+    --income: #2ECC71;
+    --expense: #E74C3C;
+  }
+  html.accent-sky {
+    --brand: #0EA5E9;
+    --brand-soft: #E0F2FE;
+    --brand-from: #38BDF8;
+    --brand-to: #0EA5E9;
+    --brand-glow: rgba(14,165,233,0.45);
+  }
+  * { -webkit-tap-highlight-color: transparent; box-sizing: border-box; }
+  html { overscroll-behavior-x: none; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #F8F9FA; overscroll-behavior-x: none; }
+
+  /* ── Dark Mode ── */
+  html.dark { --brand-soft: rgba(255,107,138,0.15); }
+  html.dark.accent-sky { --brand-soft: rgba(14,165,233,0.15); }
+  html.dark body { background: #111827; color: #f9fafb; }
+  html.dark .bg-white  { background-color: #1f2937 !important; }
+  html.dark .bg-gray-50 { background-color: #111827 !important; }
+  html.dark .bg-gray-100 { background-color: #374151 !important; }
+  html.dark .bg-gray-200 { background-color: #4b5563 !important; }
+  html.dark .min-h-screen { background-color: #111827; }
+  html.dark .text-gray-900, html.dark .text-gray-800 { color: #f9fafb !important; }
+  html.dark .text-gray-700 { color: #e5e7eb !important; }
+  html.dark .text-gray-600 { color: #d1d5db !important; }
+  html.dark .text-gray-500 { color: #9ca3af !important; }
+  html.dark .text-gray-400 { color: #6b7280 !important; }
+  html.dark .text-gray-300 { color: #4b5563 !important; }
+  html.dark .border-gray-100 { border-color: #374151 !important; }
+  html.dark .border-gray-200 { border-color: #4b5563 !important; }
+  html.dark .border-gray-300 { border-color: #6b7280 !important; }
+  /* inputs: skip bg-transparent ones (e.g. emoji inputs inside icon circles) */
+  html.dark input:not(.bg-transparent), html.dark select, html.dark textarea { background-color: #374151 !important; color: #f9fafb !important; border-color: #4b5563 !important; }
+  html.dark .shadow-sm { box-shadow: 0 1px 2px rgba(0,0,0,.5) !important; }
+  html.dark .shadow-md { box-shadow: 0 4px 6px rgba(0,0,0,.6) !important; }
+  html.dark .shadow-lg { box-shadow: 0 10px 15px rgba(0,0,0,.7) !important; }
+  html.dark .divide-gray-100 > * + * { border-color: #374151 !important; }
+  html.dark .ring-gray-200 { --tw-ring-color: #4b5563 !important; }
+  .amount-font { font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+  .safe-bottom { padding-bottom: calc(80px + env(safe-area-inset-bottom)); }
+  .no-scrollbar::-webkit-scrollbar { display: none; }
+  .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+  @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
+  .fade-in { animation: fadeIn .2s ease; }
+  @keyframes slideUp { from { transform:translateY(100%); } to { transform:translateY(0); } }
+  .sheet { animation: slideUp .25s cubic-bezier(.32,.72,0,1); }
+  input[type=number]::-webkit-outer-spin-button,
+  input[type=number]::-webkit-inner-spin-button { -webkit-appearance:none; }
+  @keyframes slideDown { from { transform:translateY(0); } to { transform:translateY(110%); } }
+  .sheet-exit { animation: slideDown .24s cubic-bezier(.32,.72,0,1) forwards; }
+  @keyframes slideInRight { from { transform:translateX(36px); opacity:0; } to { transform:translateX(0); opacity:1; } }
+  @keyframes slideInLeft { from { transform:translateX(-36px); opacity:0; } to { transform:translateX(0); opacity:1; } }
+  .tab-slide-right { animation: slideInRight .2s ease; }
+  .tab-slide-left { animation: slideInLeft .2s ease; }
+  @keyframes fadeOut { from { opacity:1; } to { opacity:0; pointer-events:none; } }
+  .fade-out { animation: fadeOut .22s ease forwards; }
+  @keyframes slideUpPad { from { transform:translateY(100%); } to { transform:translateY(0); } }
+  .pad-enter { animation: slideUpPad .18s cubic-bezier(.32,.72,0,1) both; }
+  @keyframes amountChange { from { opacity:0; transform:translateY(5px); } to { opacity:1; transform:translateY(0); } }
+  .amount-change { animation: amountChange .22s ease; }
+  @keyframes slideInBottom { from { transform:translateY(100%); opacity:0; } to { transform:translateY(0); opacity:1; } }
+  .sheet-bottom { animation: slideInBottom .28s cubic-bezier(.32,.72,0,1); }
