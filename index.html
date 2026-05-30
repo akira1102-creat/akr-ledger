@@ -5,11 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
 <meta name="theme-color" content="#F8F9FA" media="(prefers-color-scheme: light)" />
 <meta name="theme-color" content="#111827" media="(prefers-color-scheme: dark)" />
-<link rel="manifest" href="%BASE_URL%manifest.json" />
+<link rel="manifest" data-manifest="manifest.json" />
 <title>AKR記帳本</title>
 
 <script>
   (function(){
+    var manifest = document.querySelector('link[rel="manifest"]');
+    if(manifest) manifest.href = new URL("manifest.json", window.location.href).href;
     var t = localStorage.getItem("akr-theme") || "system";
     var dark = t==="dark"||(t==="system"&&window.matchMedia("(prefers-color-scheme:dark)").matches);
     if(dark) document.documentElement.classList.add("dark");
@@ -20,9 +22,10 @@
     });
   })();
 </script>
+  <script type="module" crossorigin src="./assets/index-sfnbuWU3.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/index-DItG5AOR.css">
 </head>
 <body>
-<div id="root"></div>
-<script type="module" src="/src/main.jsx"></script>
+<div id="root"></div>
 </body>
 </html>

@@ -1,6 +1,6 @@
 // AKR記帳本 Service Worker
 // ⚠️ 每次部署新版本，請遞增 CACHE 版本號，舊快取會在 activate 時自動清除
-const CACHE = "akr-ledger-v95";
+const CACHE = "akr-ledger-v98";
 
 const STATIC_ASSETS = [
   "./manifest.json",
@@ -18,6 +18,7 @@ self.addEventListener("install", e => {
   e.waitUntil(
     caches.open(CACHE).then(c => c.addAll(STATIC_ASSETS)).catch(() => {})
   );
+  self.skipWaiting();
 });
 
 self.addEventListener("message", e => {
@@ -52,7 +53,7 @@ self.addEventListener("fetch", e => {
           caches.open(CACHE).then(c => c.put(req, copy)).catch(() => {});
           return res;
         }).catch(() => cached);
-        return cached || fetcher;
+        return fetcher || cached;
       })
     );
     return;
