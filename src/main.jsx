@@ -1175,7 +1175,7 @@ function HomeView({store, rates, base, entries, onEdit, onDelete, onCopy, monthT
   const dayAllowance = tb > 0 && remainingDays > 0 ? remainingBudget / remainingDays : 0;
   const dayBudget    = tb > 0 ? tb / daysInMonth : 0;
   // 本週天數（固定）
-  const weekDays = Math.min(weekStart.getDate() + 6, daysInMonth) - weekStart.getDate() + 1;
+  const weekDays = 7;
   // 本週預算：週首日快照（剩餘預算 ÷ 剩餘星期數），整週不動
   const weekBudget = useMemo(() => {
     if (tb <= 0) return 0;
@@ -2011,7 +2011,7 @@ function OtherView({store, setStore}) {
     }
   };
   const aboutRows = [
-    ["版本","v1.1.260530",false],
+    ["版本","v1.1.260602",false],
     ["製作者","AKiRa",true],
     ["技術","React · Tailwind · PWA",false],
     ["支援幣種","MOP · HKD · CNY · JPY · TWD",false],
