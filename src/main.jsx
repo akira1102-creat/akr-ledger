@@ -1176,7 +1176,7 @@ function HomeView({store, rates, base, entries, onEdit, onDelete, onCopy, monthT
   const dayBudget    = tb > 0 ? tb / daysInMonth : 0;
   // 本週天數（固定）
   const weekDays = 7;
-  const weekBudget = tb > 0 ? tb * 7 / daysInMonth : 0;
+  const weekBudget = tb > 0 ? (budgetInBalance ? tb + monthTotals.inc : tb) * 7 / daysInMonth : 0;
 
   const expCatMap = store.categories.expense.reduce((a,c)=>{a[c.id]=c;return a;},{});
   const catMap = [...store.categories.expense,...store.categories.income].reduce((a,c)=>{a[c.id]=c;return a;},{});
