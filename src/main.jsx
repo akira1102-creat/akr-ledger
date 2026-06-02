@@ -1176,25 +1176,7 @@ function HomeView({store, rates, base, entries, onEdit, onDelete, onCopy, monthT
   const dayBudget    = tb > 0 ? tb / daysInMonth : 0;
   // 本週天數（固定）
   const weekDays = 7;
-  // 本週預算：週首日快照（剩餘預算 ÷ 剩餘星期數），整週不動
-  const weekBudget = useMemo(() => {
-    if (tb <= 0) return 0;
-    const KEY = "akr-week-snap";
-    try {
-      const snap = JSON.parse(localStorage.getItem(KEY) || "null");
-      if (snap && snap.weekStart === weekStartISO) return snap.amount;
-    } catch(e) {
-      reportError("本週預算快照讀取失敗", e);
-    }
-    // 剩餘星期數 = 從本週首日到月底共幾個完整/不完整週
-    const daysToMonthEnd = daysInMonth - weekStart.getDate() + 1;
-    const rWeeks = Math.max(1, Math.ceil(daysToMonthEnd / 7));
-    const amount = remainingBudget / rWeeks;
-    try { localStorage.setItem(KEY, JSON.stringify({ weekStart: weekStartISO, amount })); } catch(e) {
-      reportError("本週預算快照儲存失敗", e);
-    }
-    return amount;
-  }, [weekStartISO, tb]); // eslint-disable-line react-hooks/exhaustive-deps
+  const weekBudget = tb > 0 ? tb * 7 / daysInMonth : 0;
 
   const expCatMap = store.categories.expense.reduce((a,c)=>{a[c.id]=c;return a;},{});
   const catMap = [...store.categories.expense,...store.categories.income].reduce((a,c)=>{a[c.id]=c;return a;},{});
@@ -2011,7 +1993,7 @@ function OtherView({store, setStore}) {
     }
   };
   const aboutRows = [
-    ["版本","v1.1.260602",false],
+    ["版本","v1.1.260602b",false],
     ["製作者","AKiRa",true],
     ["技術","React · Tailwind · PWA",false],
     ["支援幣種","MOP · HKD · CNY · JPY · TWD",false],
