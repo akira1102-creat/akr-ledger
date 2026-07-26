@@ -48,7 +48,12 @@
   html.dark .divide-gray-100 > * + * { border-color: #374151 !important; }
   html.dark .ring-gray-200 { --tw-ring-color: #4b5563 !important; }
   .amount-font { font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
-  .safe-bottom { padding-bottom: calc(80px + env(safe-area-inset-bottom)); }
+  .safe-top { padding-top: var(--safe-area-inset-top, env(safe-area-inset-top, 0px)); }
+  .fullscreen-safe-top { padding-top: var(--safe-area-inset-top, env(safe-area-inset-top, 0px)); }
+  html.native-android .fullscreen-safe-top {
+    padding-top: max(var(--safe-area-inset-top, env(safe-area-inset-top, 0px)), 24px);
+  }
+  .safe-bottom { padding-bottom: calc(80px + var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px))); }
   .no-scrollbar::-webkit-scrollbar { display: none; }
   .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
   @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }

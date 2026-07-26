@@ -1,31 +1,28 @@
 <!DOCTYPE html>
 <html lang="zh-Hant">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
-<meta name="theme-color" content="#F8F9FA" media="(prefers-color-scheme: light)" />
-<meta name="theme-color" content="#111827" media="(prefers-color-scheme: dark)" />
-<link rel="manifest" data-manifest="manifest.json" />
-<title>AKR記帳本</title>
-
-<script>
-  (function(){
-    var manifest = document.querySelector('link[rel="manifest"]');
-    if(manifest) manifest.href = new URL("manifest.json", window.location.href).href;
-    var t = localStorage.getItem("akr-theme") || "system";
-    var dark = t==="dark"||(t==="system"&&window.matchMedia("(prefers-color-scheme:dark)").matches);
-    if(dark) document.documentElement.classList.add("dark");
-    if((localStorage.getItem("akr-accent")||"sky")==="sky") document.documentElement.classList.add("accent-sky");
-    window.matchMedia("(prefers-color-scheme:dark)").addEventListener("change",function(e){
-      if(localStorage.getItem("akr-theme")==="system")
-        document.documentElement.classList.toggle("dark",e.matches);
-    });
-  })();
-</script>
-  <script type="module" crossorigin src="./assets/index-D98Ieay0.js"></script>
-  <link rel="stylesheet" crossorigin href="./assets/index-Dk5HWIF8.css">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+  <meta name="theme-color" content="#F8F9FA" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#111827" media="(prefers-color-scheme: dark)" />
+  <link rel="manifest" href="./assets/manifest-HsPQUnd8.json" />
+  <link rel="icon" href="./assets/icon-192-CTTiAWij.png" type="image/png" />
+  <title>錢有數</title>
+  <script>
+    (function () {
+      var theme = localStorage.getItem("akr-theme") || "system";
+      var dark = theme === "dark" ||
+        (theme === "system" && window.matchMedia("(prefers-color-scheme:dark)").matches);
+      if (dark) document.documentElement.classList.add("dark");
+      if ((localStorage.getItem("akr-accent") || "sky") === "sky") {
+        document.documentElement.classList.add("accent-sky");
+      }
+    })();
+  </script>
+  <script type="module" crossorigin src="./assets/index-Dmmu9TGd.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/index-C52xpsFa.css">
 </head>
 <body>
-<div id="root"></div>
+  <div id="root"></div>
 </body>
 </html>

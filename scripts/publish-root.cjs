@@ -26,7 +26,7 @@ if (!htmlSource) throw new Error("Vite build did not emit an HTML entry.");
 copyFile(path.join(dist, htmlSource), path.join(root, "index.html"));
 copyDir(path.join(dist, "assets"), path.join(root, "assets"));
 
-for (const file of ["manifest.json", "sw.js", "icon.svg", "icon-192.png", "icon-512.png"]) {
-  const src = path.join(dist, file);
-  if (fs.existsSync(src)) copyFile(src, path.join(root, file));
+for (const entry of fs.readdirSync(dist, { withFileTypes: true })) {
+  if (!entry.isFile() || entry.name === htmlSource) continue;
+  copyFile(path.join(dist, entry.name), path.join(root, entry.name));
 }

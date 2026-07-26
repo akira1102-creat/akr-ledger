@@ -1,5 +1,18 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { createRoot } from "react-dom/client";
+import { Capacitor } from "@capacitor/core";
+import { App as NativeApp } from "@capacitor/app";
+import { FirebaseAuthentication } from "@capacitor-firebase/authentication";
+import PremiumView, { PremiumBadge, PremiumGate } from "./PremiumView";
+import {
+  MEMBERSHIP_COLLECTION,
+  hasActivePremiumMembership,
+  mergeCloudProfiles,
+  readAccountCloudState,
+  saveCloudProfileIndex,
+} from "./cloudAccount";
+import { isNative, lightHaptic, prepareNativeShell, setDailyReminder } from "./native";
+import { useSubscription } from "./subscription";
 import "./styles.css";
 
 /* ===================== 常數 ===================== */
@@ -14,7 +27,7 @@ const DEFAULT_RATES = { MOP: 1, HKD: 1.03, CNY: 1.11, JPY: 0.055, TWD: 0.25 };
 
 const reportError = (scope, error, userMessage) => {
   const message = userMessage || (error?.message ? `${scope}：${error.message}` : scope);
-  console.error(`[AKR Ledger] ${scope}`, error);
+  console.error(`[QYS Ledger] ${scope}`, error);
   window.dispatchEvent(new CustomEvent("akr-app-error", { detail: { message } }));
 };
 
@@ -23,12 +36,12 @@ const FB_STATE_KEY = "akr-fb-state";
 const FB_REDIRECT_KEY = "akr-fb-redirect-pending";
 const FB_CDN = "https://www.gstatic.com/firebasejs/10.12.2";
 const FB_CONFIG = {
-  apiKey: "AIzaSyCoAVgCDo1vh-YI3IWv7nm5nVav7hdqjoc",
-  authDomain: "akira-project-508eb.firebaseapp.com",
-  projectId: "akira-project-508eb",
-  storageBucket: "akira-project-508eb.firebasestorage.app",
-  messagingSenderId: "19932489246",
-  appId: "1:19932489246:web:46ad2fd86929eb4ba5700f",
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID,
 };
 
 // Dynamically load Firebase scripts only when needed (keeps initial render fast)
@@ -37,6 +50,9 @@ const loadFirebase = () => {
   if (_fbPromise) return _fbPromise;
   _fbPromise = (async () => {
     if (window._fbDb) return;
+    if (!FB_CONFIG.apiKey || !FB_CONFIG.projectId || !FB_CONFIG.appId) {
+      throw new Error("尚未設定原有 Web App 的 Firebase 專案");
+    }
     const loadScript = src => new Promise((res, rej) => {
       const s = document.createElement("script");
       s.src = src; s.onload = res; s.onerror = rej;
@@ -52,7 +68,7 @@ const loadFirebase = () => {
   return _fbPromise;
 };
 
-function useFirebaseSync(store, setStore, activeProfile) {
+function useFirebaseSync(store, setStore, activeProfile, enabled=true) {
   const profileId = activeProfile?.id || DEFAULT_PROFILE_ID;
   const fbStateKey = profileScopedKey(FB_STATE_KEY, profileId);
   const fbRedirectKey = profileScopedKey(FB_REDIRECT_KEY, profileId);
@@ -93,13 +109,17 @@ function useFirebaseSync(store, setStore, activeProfile) {
 
   const downloadFb = async (uid) => {
     const snap = await docRef(uid).get();
-    if (!snap.exists) return { storeData: null, syncedAt: null };
-    const { _cloudSyncedAt, ...storeData } = snap.data();
-    return { storeData, syncedAt: _cloudSyncedAt || null };
+    if (!snap.exists) return { storeData: null, syncedAt: null, needsOwnershipUpgrade: false };
+    const { _cloudSyncedAt, _ownerUid, ...storeData } = snap.data();
+    return {
+      storeData,
+      syncedAt: _cloudSyncedAt || null,
+      needsOwnershipUpgrade: _ownerUid !== uid,
+    };
   };
 
   const uploadFb = async (uid, data) => {
-    await docRef(uid).set({ ...data, _cloudSyncedAt: new Date().toISOString() });
+    await docRef(uid).set({ ...data, _ownerUid: uid, _cloudSyncedAt: new Date().toISOString() });
   };
 
   const justImportedRef      = useRef(false);
@@ -115,7 +135,7 @@ function useFirebaseSync(store, setStore, activeProfile) {
     startupRanRef.current = false;
     justImportedRef.current = false;
     startupJustSyncedRef.current = false;
-  }, [profileId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [profileId, enabled]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const currentSaved = loadSaved();
@@ -156,29 +176,53 @@ function useFirebaseSync(store, setStore, activeProfile) {
       alive = false;
       if (unsubscribe) unsubscribe();
     };
-  }, [profileId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [profileId, enabled]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const connect = async () => {
+  const connect = async (providerName="google", authOnly=false) => {
     setSyncing(true); setSyncError(null);
     try {
       await loadFirebase();
-      const provider = new firebase.auth.GoogleAuthProvider();
+      const provider = providerName === "apple"
+        ? new firebase.auth.OAuthProvider("apple.com")
+        : new firebase.auth.GoogleAuthProvider();
       let result;
-      try {
-        result = await window._fbAuth.signInWithPopup(provider);
-      } catch(e) {
-        if (["auth/popup-blocked", "auth/operation-not-supported-in-this-environment", "auth/cancelled-popup-request"].includes(e.code)) {
-          try { localStorage.setItem(fbRedirectKey, "1"); } catch(err) {
-            reportError("Google redirect 狀態儲存失敗", err, "Google 登入狀態儲存失敗，請重試。");
+      if (Capacitor.isNativePlatform()) {
+        const nativeResult = providerName === "apple"
+          ? await FirebaseAuthentication.signInWithApple({ skipNativeAuth: true })
+          : await FirebaseAuthentication.signInWithGoogle({
+              skipNativeAuth: true,
+              useCredentialManager: false,
+            });
+        const credential = providerName === "apple"
+          ? provider.credential({
+              idToken: nativeResult.credential?.idToken,
+              rawNonce: nativeResult.credential?.nonce,
+            })
+          : firebase.auth.GoogleAuthProvider.credential(nativeResult.credential?.idToken);
+        result = await window._fbAuth.signInWithCredential(credential);
+      } else {
+        try {
+          result = await window._fbAuth.signInWithPopup(provider);
+        } catch(e) {
+          if (["auth/popup-blocked", "auth/operation-not-supported-in-this-environment", "auth/cancelled-popup-request"].includes(e.code)) {
+            try { localStorage.setItem(fbRedirectKey, "1"); } catch(err) {
+              reportError("Google redirect 狀態儲存失敗", err, "Google 登入狀態儲存失敗，請重試。");
+            }
+            await window._fbAuth.signInWithRedirect(provider);
+            return;
           }
-          await window._fbAuth.signInWithRedirect(provider);
-          return;
+          throw e;
         }
-        throw e;
       }
       const user = toFbUser(result.user);
+      if (authOnly || !enabled) {
+        setFbUser(user);
+        setStartupDone(false);
+        persistState(user, lastSync, lastUpload);
+        return;
+      }
 
-      const { storeData: cloudData } = await downloadFb(user.uid);
+      const { storeData: cloudData, needsOwnershipUpgrade } = await downloadFb(user.uid);
 
       if (cloudData && cloudData.entries) {
         const doImport = window.confirm(
@@ -186,6 +230,7 @@ function useFirebaseSync(store, setStore, activeProfile) {
         );
         if (doImport) {
           normalizeStore(cloudData);
+          if (needsOwnershipUpgrade) await uploadFb(user.uid, cloudData);
           justImportedRef.current = true;
           setStore(cloudData);
         } else {
@@ -223,9 +268,35 @@ function useFirebaseSync(store, setStore, activeProfile) {
       reportError("Google 同步狀態清除失敗", e);
     }
     window._fbAuth?.signOut?.().catch(e => reportError("Google 登出失敗", e));
+    if (Capacitor.isNativePlatform()) {
+      FirebaseAuthentication.signOut().catch(e => reportError("原生 Google 登出失敗", e));
+    }
+  };
+
+  const deleteCloudAccount = async () => {
+    if (!fbUser) throw new Error("請先登入需要刪除嘅 Google 帳號");
+    await loadFirebase();
+    const snapshot = await window._fbDb.collection("akr_ledger").where("_ownerUid", "==", fbUser.uid).get();
+    const batch = window._fbDb.batch();
+    snapshot.docs.forEach(item => batch.delete(item.ref));
+    await batch.commit();
+    const currentUser = window._fbAuth.currentUser;
+    if (currentUser) await currentUser.delete();
+    if (Capacitor.isNativePlatform()) await FirebaseAuthentication.signOut();
+    setFbUser(null);
+    setLastSync(null);
+    setLastUpload(null);
+    setSyncError(null);
+    try { localStorage.removeItem(fbStateKey); } catch(e) {
+      reportError("帳戶狀態清除失敗", e);
+    }
   };
 
   const syncNow = async () => {
+    if (!enabled) {
+      setSyncError("雲端同步需要 Premium。");
+      return;
+    }
     if (!fbUser) { alert("尚未連接 Google 同步"); return; }
     setSyncing(true); setSyncError(null);
     try {
@@ -241,6 +312,7 @@ function useFirebaseSync(store, setStore, activeProfile) {
 
   // ── Startup sync — loads Firebase then syncs once on mount ──────────────
   useEffect(() => {
+    if (!enabled) return;
     if (!fbUser) {
       startupRanRef.current = false;
       setStartupDone(false);
@@ -254,7 +326,11 @@ function useFirebaseSync(store, setStore, activeProfile) {
       try {
         setSyncing(true); setSyncError(null);
         await loadFirebase();
-        const { storeData: cloudData, syncedAt: cloudSyncedAt } = await downloadFb(fbUser.uid);
+        const {
+          storeData: cloudData,
+          syncedAt: cloudSyncedAt,
+          needsOwnershipUpgrade,
+        } = await downloadFb(fbUser.uid);
         if (!alive) return;
 
         if (!cloudData || !cloudData.entries) {
@@ -270,6 +346,7 @@ function useFirebaseSync(store, setStore, activeProfile) {
 
         if (cloudIsNewer) {
           normalizeStore(cloudData);
+          if (needsOwnershipUpgrade) await uploadFb(fbUser.uid, cloudData);
           justImportedRef.current = true;
           if (alive) setStore(cloudData);
         } else {
@@ -289,10 +366,11 @@ function useFirebaseSync(store, setStore, activeProfile) {
       } finally { if (alive) setSyncing(false); }
     })();
     return () => { alive = false; };
-  }, [fbUser?.uid, profileId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [fbUser?.uid, profileId, enabled]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Debounce upload ───────────────────────────────────────────────────────
   useEffect(() => {
+    if (!enabled) return;
     if (!fbUser) return;
     if (!startupDone) return;
     let cancelled = false;
@@ -308,9 +386,10 @@ function useFirebaseSync(store, setStore, activeProfile) {
       finally { if (!cancelled) setSyncing(false); }
     }, 1500);
     return () => { cancelled = true; clearTimeout(timer); };
-  }, [store, fbUser, startupDone, profileId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [store, fbUser, startupDone, profileId, enabled]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  return { fbUser, lastSync, lastUpload, syncing, syncError, connect, disconnect, syncNow, profileName: activeProfile?.name };
+  const connectForDeletion = providerName => connect(providerName, true);
+  return { enabled, fbUser, lastSync, lastUpload, syncing, syncError, connect, connectForDeletion, disconnect, syncNow, deleteCloudAccount, profileName: activeProfile?.name };
 }
 // ===================== End GitHub Gist Sync =====================
 
@@ -506,8 +585,7 @@ const fmt = (v, currency, nd=false) => {
   return `${cur.symbol} ${n.toLocaleString("en-US", {minimumFractionDigits:0, maximumFractionDigits:nd?0:2})}`;
 };
 
-/* ===================== Zaim CSV 導入 ===================== */
-const CSV_CAT_COLORS = ["#FFB4A2","#9BD1E5","#F5A6C9","#B5A6F5","#F7C873","#A7E0A0","#F29E9E","#8BCEC2","#C9A0DC","#CBD5E1"];
+const CATEGORY_COLORS = ["#FFB4A2","#9BD1E5","#F5A6C9","#B5A6F5","#F7C873","#A7E0A0","#F29E9E","#8BCEC2","#C9A0DC","#CBD5E1"];
 function parseCSVRow(line) {
   const cols=[]; let cur="",inQ=false;
   for(let i=0;i<line.length;i++){
@@ -519,75 +597,6 @@ function parseCSVRow(line) {
   cols.push(cur.trim());
   return cols;
 }
-function importZaimCSV(text, store) {
-  // Zaim CSV format:
-  // 日付(0), 方法(1), カテゴリ(2), カテゴリの内訳(3), 支払元(4), 入金先(5),
-  // 品目(6), メモ(7), お店(8), 通貨(9), 収入(10), 支出(11), 振替(12), 残高調整(13), ...
-  const lines = text.split(/\r?\n/).filter(l=>l.trim());
-  if (lines.length < 2) return null;
-  const newEntries = [];
-  const catColorMap = {};
-  let colorIdx = 0;
-  const expCats = [...store.categories.expense];
-  const incCats = [...store.categories.income];
-  let imported = 0;
-  for (let i=1;i<lines.length;i++) {
-    const cols = parseCSVRow(lines[i]);
-    if (cols.length < 12) continue;
-    const date     = cols[0];
-    const catName  = cols[2];
-    const subName  = cols[3];
-    const itemName = cols[6];
-    const memoStr  = cols[7];
-    const shopName = cols[8];
-    const currency = cols[9] || "MOP";
-    const incAmt   = parseFloat(cols[10]) || 0;
-    const expAmt   = parseFloat(cols[11]) || 0;
-    const transfer = parseFloat(cols[12]) || 0;
-
-    // Skip transfer/adjustment entries
-    if (transfer > 0) continue;
-    if (incAmt === 0 && expAmt === 0) continue;
-
-    const entryType = incAmt > 0 ? "income" : "expense";
-    const amount    = entryType === "income" ? incAmt : expAmt;
-    // memo = itemName or memoStr or shopName
-    const memo = [itemName, memoStr, shopName].filter(s=>s&&s!=="-"&&s!=="").join(" ").trim();
-
-    const cats = entryType==="income" ? incCats : expCats;
-    // Match parent category by name
-    let parentCat = cats.find(c=>!c.parentId && c.name===catName);
-    if (!parentCat && catName && catName!=="-") {
-      const color = catColorMap[catName] || CSV_CAT_COLORS[colorIdx++ % CSV_CAT_COLORS.length];
-      catColorMap[catName] = color;
-      const safeId = "csv_p_"+catName.replace(/[^\w]/g,"_")+"_"+Date.now();
-      parentCat = {id:safeId, name:catName, icon:"📌", color, parentId:null};
-      cats.push(parentCat);
-    }
-    let catId = parentCat ? parentCat.id : (entryType==="expense" ? "other_e" : "other_i");
-    // Match sub-category
-    if (subName && subName!=="-" && parentCat) {
-      let subCat = cats.find(c=>c.parentId===parentCat.id && c.name===subName);
-      if (!subCat) {
-        const safeSubId = "csv_s_"+subName.replace(/[^\w]/g,"_")+"_"+Date.now()+"_"+i;
-        subCat = {id:safeSubId, name:subName, icon:"📌", color:parentCat.color, parentId:parentCat.id};
-        cats.push(subCat);
-      }
-      catId = subCat.id;
-    }
-    newEntries.push({
-      id: Date.now()+"_csv_"+i,
-      date, type:entryType, category:catId, amount, currency, memo
-    });
-    imported++;
-  }
-  return {
-    entries: [...store.entries, ...newEntries],
-    categories: { expense: expCats, income: incCats },
-    imported,
-  };
-}
-
 /* ===================== UI 小組件 ===================== */
 /* ===================== CSV 匯出 / 匯入 ===================== */
 const csvEscape = value => {
@@ -760,8 +769,8 @@ function SortableList({ items, renderItem, onReorder, itemHeight = 68 }) {
 // Named back-navigation layers — priority order is fixed (index 0 = highest).
 // Each slot holds at most one handler. consumeBack fires the highest-priority
 // active layer, so push ordering never matters.
-const _layers = { calcPad:null, entryModal:null, chartPanel:null, chartSub:null, settingsTab:null, goHome:null };
-const _layerOrder = ['calcPad','entryModal','chartPanel','chartSub','settingsTab','goHome'];
+const _layers = { premium:null, calcPad:null, entryModal:null, chartPanel:null, chartSub:null, settingsTab:null, goHome:null };
+const _layerOrder = ['premium','calcPad','entryModal','chartPanel','chartSub','settingsTab','goHome'];
 const setLayer   = (name, fn) => { _layers[name] = fn; };
 const clearLayer = (name)     => { _layers[name] = null; };
 const consumeBack = () => {
@@ -812,7 +821,19 @@ function useLongPress(callback, ms=520) {
 
 /* ===================== App ===================== */
 function App() {
+  const subscription = useSubscription();
+  const [paywallOpen, setPaywallOpen] = useState(false);
+  const openPremium = useCallback(() => {
+    setLayer("premium", () => setPaywallOpen(false));
+    setPaywallOpen(true);
+  }, []);
+  const closePremium = useCallback(() => {
+    clearLayer("premium");
+    setPaywallOpen(false);
+  }, []);
   const [profiles, setProfiles] = useState(loadProfiles);
+  const profilesRef = useRef(profiles);
+  const [cloudProfilesReadyUid, setCloudProfilesReadyUid] = useState(null);
   const [activeProfileId, setActiveProfileId] = useState(() => loadActiveProfileId());
   const activeProfile = profiles.find(p => p.id === activeProfileId) || profiles[0] || defaultProfile();
   const [store, setStore] = useState(() => loadStore(activeProfile.id));
@@ -836,7 +857,104 @@ function App() {
   const [entryCloseSignal, setEntryCloseSignal] = useState(0);
   const [editing, setEditing] = useState(null);
   const [viewMonth, setViewMonth] = useState(() => { const d=new Date(); return monthKey(d); });
-  const fbDrive = useFirebaseSync(store, setStore, activeProfile);
+  const fbDrive = useFirebaseSync(store, setStore, activeProfile, subscription.isPremium);
+  const refreshMembership = useCallback(async () => {
+    const uid = fbDrive.fbUser?.uid;
+    if (!uid) {
+      subscription.setAccountEntitlement(false);
+      return false;
+    }
+    await loadFirebase();
+    const membershipSnap = await window._fbDb.collection(MEMBERSHIP_COLLECTION).doc(uid).get();
+    const isPremium = membershipSnap.exists
+      && hasActivePremiumMembership(membershipSnap.data());
+    subscription.setAccountEntitlement(isPremium);
+    return isPremium;
+  }, [fbDrive.fbUser?.uid, subscription.setAccountEntitlement]);
+
+  useEffect(() => {
+    profilesRef.current = profiles;
+  }, [profiles]);
+
+  useEffect(() => {
+    const uid = fbDrive.fbUser?.uid;
+    if (!uid) return;
+    let cancelled = false;
+    let unsubscribe = null;
+    loadFirebase().then(() => {
+      if (cancelled) return;
+      unsubscribe = window._fbDb.collection(MEMBERSHIP_COLLECTION).doc(uid)
+        .onSnapshot(snapshot => {
+          if (cancelled) return;
+          subscription.setAccountEntitlement(
+            snapshot.exists && hasActivePremiumMembership(snapshot.data()),
+          );
+        }, error => {
+          if (!cancelled) reportError("會員狀態監聽失敗", error);
+        });
+    }).catch(error => {
+      if (!cancelled) reportError("會員狀態連線失敗", error);
+    });
+    return () => {
+      cancelled = true;
+      unsubscribe?.();
+    };
+  }, [fbDrive.fbUser?.uid, subscription.setAccountEntitlement]);
+
+  useEffect(() => {
+    const uid = fbDrive.fbUser?.uid;
+    let cancelled = false;
+
+    if (!uid) {
+      setCloudProfilesReadyUid(null);
+      subscription.clearIdentity();
+      return () => { cancelled = true; };
+    }
+
+    (async () => {
+      try {
+        await subscription.identify(uid);
+        await loadFirebase();
+        const account = await readAccountCloudState(window._fbDb, uid);
+        if (cancelled) return;
+        subscription.setAccountEntitlement(account.isPremium);
+        const mergedProfiles = mergeCloudProfiles(profilesRef.current, account.cloudProfiles);
+        profilesRef.current = mergedProfiles;
+        setProfiles(mergedProfiles);
+        setCloudProfilesReadyUid(uid);
+      } catch (error) {
+        if (cancelled) return;
+        subscription.setAccountEntitlement(false);
+        setCloudProfilesReadyUid(null);
+        reportError("會員及帳本索引讀取失敗", error, "未能確認會員或雲端帳本，請檢查網絡後重試。");
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [
+    fbDrive.fbUser?.uid,
+    subscription.clearIdentity,
+    subscription.identify,
+    subscription.setAccountEntitlement,
+  ]);
+
+  useEffect(() => {
+    const uid = fbDrive.fbUser?.uid;
+    if (!uid || cloudProfilesReadyUid !== uid || !subscription.isPremium) return;
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      try {
+        await loadFirebase();
+        if (!cancelled) await saveCloudProfileIndex(window._fbDb, uid, profiles);
+      } catch (error) {
+        if (!cancelled) reportError("雲端帳本索引儲存失敗", error);
+      }
+    }, 500);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [cloudProfilesReadyUid, fbDrive.fbUser?.uid, profiles, subscription.isPremium]);
 
   useEffect(() => { saveProfiles(profiles); }, [profiles]);
   useEffect(() => { saveStore(store, activeProfile.id); }, [store, activeProfile.id]);
@@ -854,6 +972,10 @@ function App() {
   }, [activeProfile.id, store]);
 
   const createProfile = useCallback((name) => {
+    if (!subscription.isPremium) {
+      openPremium();
+      return;
+    }
     const cleanName = (name || "").trim() || "新帳本";
     const id = `profile_${Date.now().toString(36)}`;
     const profile = { id, name: cleanName, createdAt: new Date().toISOString() };
@@ -866,7 +988,7 @@ function App() {
     setUndoEntry(null);
     setEditing(null);
     setEntryOpen(false);
-  }, []);
+  }, [openPremium, subscription.isPremium]);
 
   const renameProfile = useCallback((id, name) => {
     const cleanName = (name || "").trim();
@@ -913,6 +1035,16 @@ function App() {
 
   useEffect(()=>{ tabRef.current=tab; }, [tab]);
 
+  useEffect(() => {
+    prepareNativeShell();
+    if (!isNative()) return;
+    let listener;
+    NativeApp.addListener("backButton", () => {
+      if (!consumeBack() && Capacitor.getPlatform() === "android") NativeApp.exitApp();
+    }).then(handle => { listener = handle; });
+    return () => listener?.remove();
+  }, []);
+
   // Register "go home" layer when on a non-home tab.
   useEffect(()=>{
     if(tab==="home"){ clearLayer('goHome'); return; }
@@ -934,18 +1066,18 @@ function App() {
       window.history.replaceState({},document.title,window.location.pathname);
     }
     // Notify if > 1 day without entry
-    if(localStorage.getItem("akr-notify")==="1" && "Notification" in window && Notification.permission==="granted"){
+    if(!isNative() && localStorage.getItem("akr-notify")==="1" && "Notification" in window && Notification.permission==="granted"){
       const all = store.entries;
       if(all.length > 0){
         const last = all.map(e=>e.date).sort().reverse()[0];
         const days = (Date.now() - new Date(last).getTime()) / 86400000;
-        if(days > 1) new Notification("AKR記帳本 提醒", {body:`你已 ${Math.floor(days)} 日未記帳，記得記低每日支出！`, icon:"./icon-192.png"});
+        if(days > 1) new Notification("錢有數 提醒", {body:`你已 ${Math.floor(days)} 日未記帳，記得記低每日支出！`, icon:"./icon-192.png"});
       }
     }
     // Auto-fetch rates once per day
     const todayKey = new Date().toISOString().slice(0,10);
     const rateDateKey = profileScopedKey("akr-last-rate-date", activeProfile.id);
-    if(localStorage.getItem(rateDateKey) !== todayKey) {
+    if(subscription.isPremium && localStorage.getItem(rateDateKey) !== todayKey) {
       const initS = loadStore(activeProfile.id);
       const b = initS.settings.baseCurrency;
       fetch(`https://open.er-api.com/v6/latest/${b}`)
@@ -967,9 +1099,10 @@ function App() {
         })
         .catch(e => reportError("自動同步匯率失敗", e, "自動同步匯率失敗，可稍後到設定手動同步。"));
     }
-  }, [activeProfile.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeProfile.id, subscription.isPremium]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
+    if (isNative()) return;
     const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) ||
       (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
     if (isIOS) return; // iOS: no pushState → no white-screen swipe-back issue
@@ -1024,7 +1157,7 @@ function App() {
   }, [undoEntry]);
 
   // Track the back-stack handler for the entry modal so we can pop it
-  const openAdd  = () => { setEditing(null); setLayer('entryModal', ()=>setEntryCloseSignal(s=>s+1)); setEntryOpen(true); };
+  const openAdd  = () => { lightHaptic(); setEditing(null); setLayer('entryModal', ()=>setEntryCloseSignal(s=>s+1)); setEntryOpen(true); };
   const openEdit = (e) => { setEditing(e);   setLayer('entryModal', ()=>setEntryCloseSignal(s=>s+1)); setEntryOpen(true); };
   const openCopy = useCallback((e) => {
     setEditing({...e, id:undefined, date:toISO(new Date())});
@@ -1041,7 +1174,7 @@ function App() {
 
   return (
     <div className="min-h-screen">
-      <header className="sticky top-0 z-20 bg-white border-b border-gray-100">
+      <header className="safe-top sticky top-0 z-20 bg-white border-b border-gray-100">
         {/* ── Sync status bar ── */}
         {(()=>{
           const fbOn  = !!fbDrive.fbUser;
@@ -1057,11 +1190,12 @@ function App() {
                      <span style={{color:"var(--brand)"}}>已同步</span>
                      {fbDrive.lastUpload && <span className="text-gray-300">{new Date(fbDrive.lastUpload).toLocaleTimeString("zh-HK",{hour:"2-digit",minute:"2-digit"})}</span>}
                    </>
-                 : <span>☁️ 未啟用同步</span>}
-              </div>
-              <div className="flex items-center gap-2">
-                {fbOn && <span className="text-xs text-gray-300 max-w-[100px] truncate">{fbDrive.fbUser.email?.split("@")[0]}</span>}
-              </div>
+                  : subscription.isPremium ? <span>☁️ 未啟用同步</span> : <span>本機儲存</span>}
+               </div>
+               <div className="flex items-center gap-2">
+                  {fbOn && <span className="text-xs text-gray-300 max-w-[100px] truncate">{fbDrive.fbUser.email?.split("@")[0]}</span>}
+                  <button onClick={openPremium}><PremiumBadge isPremium={subscription.isPremium}/></button>
+               </div>
             </div>
           );
         })()}
@@ -1094,9 +1228,11 @@ function App() {
               <>
                 {t==="home"  && <HomeView store={store} rates={rates} base={base} entries={monthEntries} onEdit={openEdit} onDelete={removeEntry} onCopy={openCopy} monthTotals={monthTotals} viewMonth={viewMonth}/>}
                 {t==="cal"   && <CalendarView store={store} rates={rates} base={base} viewMonth={viewMonth} entries={monthEntries} onEdit={openEdit}/>}
-                {t==="chart" && <ChartView store={store} rates={rates} base={base} entries={monthEntries} allEntries={store.entries} viewMonth={viewMonth} onEdit={openEdit}/>}
+                {t==="chart" && (subscription.isPremium
+                  ? <ChartView store={store} rates={rates} base={base} entries={monthEntries} allEntries={store.entries} viewMonth={viewMonth} onEdit={openEdit}/>
+                  : <PremiumGate title="完整收支分析" description="升級 Premium 查看趨勢、分類分佈及預算分析。" onUpgrade={openPremium}/>)}
                 {t==="fun"   && <FunView store={store}/>}
-                {t==="set"   && <SettingsView store={store} setStore={setStore} fbDrive={fbDrive} profiles={profiles} activeProfileId={activeProfile.id} onSwitchProfile={switchProfile} onCreateProfile={createProfile} onRenameProfile={renameProfile} onDeleteProfile={deleteProfile}/>}
+                {t==="set"   && <SettingsView store={store} setStore={setStore} fbDrive={fbDrive} profiles={profiles} activeProfileId={activeProfile.id} onSwitchProfile={switchProfile} onCreateProfile={createProfile} onRenameProfile={renameProfile} onDeleteProfile={deleteProfile} subscription={subscription} onUpgrade={openPremium}/>}
               </>
             )}
           </div>
@@ -1108,7 +1244,7 @@ function App() {
       </button>
 
       <nav className="fixed bottom-0 inset-x-0 bg-white border-t border-gray-100 z-10">
-        <div className="grid grid-cols-5 h-16" style={{paddingBottom:"env(safe-area-inset-bottom)"}}>
+        <div className="grid grid-cols-5 h-16" style={{paddingBottom:"var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px))"}}>
           <TabBtn active={tab==="home"}  onClick={()=>changeTab("home")}  iconKey="home"  label="首頁" />
           <TabBtn active={tab==="cal"}   onClick={()=>changeTab("cal")}   iconKey="cal"   label="月曆" />
           <TabBtn active={tab==="chart"} onClick={()=>changeTab("chart")} iconKey="chart" label="圖表" />
@@ -1131,6 +1267,16 @@ function App() {
       )}
       {monthPickerOpen && (
         <MonthPicker value={viewMonth} onChange={setViewMonth} onClose={()=>setMonthPickerOpen(false)}/>
+      )}
+      {paywallOpen && (
+        <div className="fixed inset-0 z-[100] bg-gray-50 overflow-y-auto safe-bottom fullscreen-safe-top">
+          <div className="sticky top-0 z-10 bg-white border-b border-gray-100 px-4 py-3 flex items-center justify-between">
+            <button onClick={closePremium} className="text-sm text-gray-500">關閉</button>
+            <div className="text-sm font-bold">Premium</div>
+            <div className="w-9"/>
+          </div>
+          <div className="p-3 max-w-lg mx-auto"><PremiumView subscription={subscription} fbDrive={fbDrive} onRefreshMembership={refreshMembership}/></div>
+        </div>
       )}
       {undoEntry && (
         <UndoToast onUndo={undoDelete} onDismiss={()=>setUndoEntry(null)}/>
@@ -1357,7 +1503,7 @@ function HomeView({store, rates, base, entries, onEdit, onDelete, onCopy, monthT
             </div>
             <div className="flex justify-between items-center border-t border-gray-100 pt-2">
               <span className="text-sm font-bold">結餘</span>
-              <AnimatedAmount value={fmt(monthTotals.net,base,nd)} className={`text-base font-bold amount-font ${monthTotals.net>=0?"text-gray-800":"text-[color:var(--expense)]"}`}/>
+              <AnimatedAmount value={(monthTotals.net<0?"−":"")+fmt(monthTotals.net,base,nd)} className={`text-base font-bold amount-font ${monthTotals.net>=0?"text-gray-800":"text-[color:var(--expense)]"}`}/>
             </div>
           </div>
           {(()=>{
@@ -2101,18 +2247,24 @@ function OtherView({store, setStore}) {
   const [notifyOn, setNotifyOn] = useState(()=>localStorage.getItem("akr-notify")==="1");
   const toggleNotify = async () => {
     if(!notifyOn) {
-      if(!("Notification" in window)){ alert("此瀏覽器不支援通知"); return; }
-      const perm = await Notification.requestPermission();
-      if(perm!=="granted"){ alert("需要開啟通知權限才能啟用提醒"); return; }
+      if(isNative()) {
+        const granted = await setDailyReminder(true);
+        if(!granted){ alert("需要開啟通知權限才能啟用提醒"); return; }
+      } else {
+        if(!("Notification" in window)){ alert("此瀏覽器不支援通知"); return; }
+        const perm = await Notification.requestPermission();
+        if(perm!=="granted"){ alert("需要開啟通知權限才能啟用提醒"); return; }
+      }
       localStorage.setItem("akr-notify","1"); setNotifyOn(true);
     } else {
+      if(isNative()) await setDailyReminder(false);
       localStorage.setItem("akr-notify","0"); setNotifyOn(false);
     }
   };
   const aboutRows = [
-    ["版本","v1.1.260629",false],
+    ["版本","v2.2.260726",false],
     ["製作者","AKiRa",true],
-    ["技術","React · Tailwind · PWA",false],
+    ["技術","React · Capacitor",false],
     ["支援幣種","MOP · HKD · CNY · JPY · TWD",false],
   ];
   const noDecimals = store?.settings?.noDecimals||false;
@@ -2203,8 +2355,8 @@ function OtherView({store, setStore}) {
           <span className="text-sm font-semibold text-gray-700">關於這個 App</span>
         </div>
         <div className="flex flex-col items-center pt-6 pb-4 px-6">
-          <img src="icon-192.png" alt="AKR記帳本" className="w-16 h-16 rounded-2xl mb-3 shadow-md object-cover"/>
-          <div className="text-lg font-bold text-gray-800 mb-1">AKR記帳本</div>
+          <img src="icon-192.png" alt="錢有數" className="w-16 h-16 rounded-2xl mb-3 shadow-md object-cover"/>
+          <div className="text-lg font-bold text-gray-800 mb-1">錢有數</div>
           <div className="text-xs text-gray-400 mb-5">繁中 PWA 記帳應用</div>
           <div className="w-full">
             {aboutRows.map(([l,v,brand],i)=>(
@@ -2297,7 +2449,7 @@ function ReceiptView({store}) {
       };
       const dsh=(yp,c='#ccc',p=[4,4])=>{ctx.setLineDash(p);ctx.strokeStyle=c;ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(PAD,yp);ctx.lineTo(W-PAD,yp);ctx.stroke();ctx.setLineDash([]);};
       const sld=(yp,c='#666',lw=1.5)=>{ctx.setLineDash([]);ctx.strokeStyle=c;ctx.lineWidth=lw;ctx.beginPath();ctx.moveTo(PAD,yp);ctx.lineTo(W-PAD,yp);ctx.stroke();};
-      T('* AKR 記帳本 · 收據 *','center',y,17,true); y+=26;
+      T('* 錢有數 · 收據 *','center',y,17,true); y+=26;
       T('━━━━━━━━━━━━━━━━━━━━━━━━━━━━','center',y,12,false,'#bbb'); y+=22;
       T(`${y1} 年 ${y2} 月份支出明細`,'center',y,15,true); y+=22;
       T(`生成日期: ${today}`,'center',y,11,false,'#888'); y+=22;
@@ -2336,7 +2488,7 @@ function ReceiptView({store}) {
       }
       cv.toBlob(blob=>{
         const url=URL.createObjectURL(blob);
-        const a=document.createElement('a'); a.href=url; a.download=`AKR收據_${month}.png`; a.click();
+        const a=document.createElement('a'); a.href=url; a.download=`錢有數收據_${month}.png`; a.click();
         URL.revokeObjectURL(url); setDownloading(false);
       },'image/png');
     };
@@ -2363,7 +2515,7 @@ function ReceiptView({store}) {
         </svg>
         <div style={{background:'#FFFEF7',color:'#1a1a1a'}}>
           <div className="text-center py-4 px-4 border-b border-dashed border-gray-300">
-            <div className="font-bold tracking-wide" style={{fontSize:15}}>* AKR 記帳本 · 收據 *</div>
+            <div className="font-bold tracking-wide" style={{fontSize:15}}>* 錢有數 · 收據 *</div>
             <div className="text-gray-400 mt-0.5" style={{fontSize:11}}>━━━━━━━━━━━━━━━━━━━━━━━━━━</div>
             <div className="font-bold mt-1" style={{fontSize:13}}>{y1} 年 {y2} 月份支出明細</div>
             <div className="text-gray-400 mt-0.5" style={{fontSize:11}}>生成日期: {new Date().toLocaleDateString('zh-HK')}</div>
@@ -2424,7 +2576,7 @@ function ReceiptView({store}) {
   );
 }
 
-function ProfileSettings({profiles, activeProfileId, onSwitchProfile, onCreateProfile, onRenameProfile, onDeleteProfile}) {
+function ProfileSettings({profiles, activeProfileId, onSwitchProfile, onCreateProfile, onRenameProfile, onDeleteProfile, isPremium, onUpgrade}) {
   const [newName, setNewName] = useState("");
   const [editingId, setEditingId] = useState(null);
   const [editingName, setEditingName] = useState("");
@@ -2486,20 +2638,25 @@ function ProfileSettings({profiles, activeProfileId, onSwitchProfile, onCreatePr
       </div>
       <div className="bg-white rounded-2xl shadow-sm p-4 space-y-3">
         <div className="text-sm font-semibold text-gray-700">新增全新帳本</div>
-        <div className="flex gap-2">
-          <input value={newName} onChange={e=>setNewName(e.target.value)} onKeyDown={e=>{if(e.key==="Enter") submitNew();}}
-            placeholder="例如：媽媽、爸爸、家庭公數"
-            className="flex-1 min-w-0 border border-gray-200 rounded-xl px-3 py-2.5 text-sm"/>
-          <button onClick={submitNew} disabled={!newName.trim()}
-            className="px-4 rounded-xl text-sm font-semibold text-white disabled:opacity-40"
-            style={{background:"var(--brand)"}}>新增</button>
-        </div>
+        {isPremium ? (
+          <div className="flex gap-2">
+            <input value={newName} onChange={e=>setNewName(e.target.value)} onKeyDown={e=>{if(e.key==="Enter") submitNew();}}
+              placeholder="例如：個人、家庭公數、旅行"
+              className="flex-1 min-w-0 border border-gray-200 rounded-xl px-3 py-2.5 text-sm"/>
+            <button onClick={submitNew} disabled={!newName.trim()}
+              className="px-4 rounded-xl text-sm font-semibold text-white disabled:opacity-40"
+              style={{background:"var(--brand)"}}>新增</button>
+          </div>
+        ) : (
+          <button onClick={onUpgrade} className="w-full py-3 rounded-xl text-sm font-semibold bg-amber-50 text-amber-700">
+            ✨ Premium 解鎖多帳本
+          </button>
+        )}
       </div>
     </div>
   );
 }
-
-function SettingsView({store, setStore, fbDrive, profiles, activeProfileId, onSwitchProfile, onCreateProfile, onRenameProfile, onDeleteProfile}) {
+function SettingsView({store, setStore, fbDrive, profiles, activeProfileId, onSwitchProfile, onCreateProfile, onRenameProfile, onDeleteProfile, subscription, onUpgrade}) {
   const [tab, setTab] = useState(null);
   useEffect(()=>{
     if(tab){ setLayer('settingsTab', ()=>setTab(null)); }
@@ -2507,6 +2664,7 @@ function SettingsView({store, setStore, fbDrive, profiles, activeProfileId, onSw
     return ()=>clearLayer('settingsTab');
   },[tab]);
   const menu = [
+    {key:"premium",icon:"✨", label:subscription.isPremium?"Premium 使用中":"升級 Premium", desc:"訂閱、恢復購買及管理計劃", bg:"#FFFBEB"},
     {key:"profile",icon:"👤", label:"帳本 / 用戶", desc:"切換或新增獨立記帳用戶",       bg:"#EEF2FF"},
     {key:"layout",icon:"📐", label:"頁面佈局",   desc:"調整首頁、月曆、圖表的卡片順序及顯示", bg:"#F0F4FF"},
     {key:"cat",   icon:"🏷️", label:"分類管理",   desc:"新增、編輯、排序收支分類",     bg:"#FFF0F3"},
@@ -2543,19 +2701,20 @@ function SettingsView({store, setStore, fbDrive, profiles, activeProfileId, onSw
         設定
       </button>
       <div className="tab-slide-right">
-        {tab==="profile" && <ProfileSettings profiles={profiles} activeProfileId={activeProfileId} onSwitchProfile={onSwitchProfile} onCreateProfile={onCreateProfile} onRenameProfile={onRenameProfile} onDeleteProfile={onDeleteProfile}/>}
-        {tab==="layout" && <LayoutSettings store={store} setStore={setStore}/>}
-        {tab==="cat"    && <CatSettings store={store} setStore={setStore}/>}
+        {tab==="premium" && <PremiumView subscription={subscription} fbDrive={fbDrive} onRefreshMembership={refreshMembership}/>}
+        {tab==="profile" && <ProfileSettings profiles={profiles} activeProfileId={activeProfileId} onSwitchProfile={onSwitchProfile} onCreateProfile={onCreateProfile} onRenameProfile={onRenameProfile} onDeleteProfile={onDeleteProfile} isPremium={subscription.isPremium} onUpgrade={onUpgrade}/>}
+        {tab==="layout" && (subscription.isPremium ? <LayoutSettings store={store} setStore={setStore}/> : <PremiumGate title="自訂頁面佈局" description="Premium 可以調整卡片順序同顯示內容。" onUpgrade={onUpgrade}/>)}
+        {tab==="cat"    && (subscription.isPremium ? <CatSettings store={store} setStore={setStore}/> : <PremiumGate title="自訂收支分類" description="Premium 可以新增、編輯同排序兩層分類。" onUpgrade={onUpgrade}/>)}
         {tab==="budget" && <BudgetSettings store={store} setStore={setStore}/>}
-        {tab==="data"   && <DataSettings store={store} setStore={setStore} fbDrive={fbDrive}/>}
-        {tab==="basic"  && <BasicSettings store={store} setStore={setStore}/>}
+        {tab==="data"   && <DataSettings store={store} setStore={setStore} fbDrive={fbDrive} isPremium={subscription.isPremium} onUpgrade={onUpgrade}/>}
+        {tab==="basic"  && <BasicSettings store={store} setStore={setStore} isPremium={subscription.isPremium} onUpgrade={onUpgrade}/>}
         {tab==="other"  && <OtherView store={store} setStore={setStore}/>}
       </div>
     </div>
   );
 }
 
-function BasicSettings({store, setStore}) {
+function BasicSettings({store, setStore, isPremium, onUpgrade}) {
   const base = store.settings.baseCurrency;
   const rates = store.settings.rates;
   const [fetchingRates, setFetchingRates] = useState(false);
@@ -2605,6 +2764,10 @@ function BasicSettings({store, setStore}) {
     });
   };
   const fetchRates = async () => {
+    if (!isPremium) {
+      onUpgrade();
+      return;
+    }
     setFetchingRates(true);
     setRateMsg("");
     try {
@@ -2644,7 +2807,7 @@ function BasicSettings({store, setStore}) {
           <button onClick={fetchRates} disabled={fetchingRates}
             className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-xl font-medium transition-all ${fetchingRates?"bg-gray-100 text-gray-400":"bg-[color:var(--brand-soft)] text-[color:var(--brand)] active:opacity-70"}`}>
             <span className={fetchingRates?"animate-spin":""}>{fetchingRates?"⟳":"🔄"}</span>
-            {fetchingRates?"同步中...":"同步最新匯率"}
+            {fetchingRates?"同步中...":isPremium?"同步最新匯率":"✨ 自動匯率"}
           </button>
         </div>
         {rateMsg&&<div className="text-xs mb-3 px-1" style={{color:rateMsg.startsWith("✅")?"#2ECC71":"#E74C3C"}}>{rateMsg}</div>}
@@ -2684,7 +2847,7 @@ function CatSettings({store, setStore}) {
 
   const addParent = () => {
     const id = "cat_"+type+"_"+Date.now();
-    const color = CSV_CAT_COLORS[parentCats.length % CSV_CAT_COLORS.length];
+    const color = CATEGORY_COLORS[parentCats.length % CATEGORY_COLORS.length];
     const newCat = {id, name:"新分類", icon:"📁", color};
     setStore(s=>({...s, categories:{...s.categories, [type]:[...s.categories[type], newCat]}}));
   };
@@ -2928,6 +3091,7 @@ function ConfirmDialog({open, title, message, onConfirm, onCancel, confirmLabel=
 
 function FirebaseSyncPanel({ fbDrive, dataModified }) {
   const connected = !!fbDrive.fbUser;
+  const showApple = Capacitor.getPlatform() === "ios";
   return (
     <div className="bg-white rounded-2xl shadow-sm p-4 space-y-3">
       <div>
@@ -2963,9 +3127,15 @@ function FirebaseSyncPanel({ fbDrive, dataModified }) {
       ) : (
         <>
           <div className="text-xs text-gray-400 leading-relaxed">
-            以 Google 帳號登入同步目前帳本；不同帳本會分開備份，同一帳號可保存多個用戶。
+            登入後同步目前帳本；不同帳本會分開備份，同一帳號可保存多個用戶。
           </div>
-          <button onClick={fbDrive.connect} disabled={fbDrive.syncing}
+          {showApple && (
+            <button onClick={()=>fbDrive.connect("apple")} disabled={fbDrive.syncing}
+              className="w-full py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-50 active:opacity-80 flex items-center justify-center gap-2 bg-black">
+               使用 Apple 登入
+            </button>
+          )}
+          <button onClick={()=>fbDrive.connect("google")} disabled={fbDrive.syncing}
             className="w-full py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-50 active:opacity-80 flex items-center justify-center gap-2"
             style={{background:"#4285F4"}}>
             {fbDrive.syncing ? "⏳ 登入中…" : <><svg width="18" height="18" viewBox="0 0 48 48"><path fill="#FFF" d="M44.5 20H24v8.5h11.8C34.7 33.9 30.1 37 24 37c-7.2 0-13-5.8-13-13s5.8-13 13-13c3.1 0 5.9 1.1 8.1 2.9l6.4-6.4C34.6 4.1 29.6 2 24 2 11.8 2 2 11.8 2 24s9.8 22 22 22c11 0 21-8 21-22 0-1.3-.2-2.7-.5-4z"/></svg>以 Google 帳號登入</>}
@@ -2976,7 +3146,50 @@ function FirebaseSyncPanel({ fbDrive, dataModified }) {
   );
 }
 
-function DataSettings({store, setStore, fbDrive}) {
+function FirebaseMembershipLogin({ fbDrive }) {
+  const connected = !!fbDrive.fbUser;
+  const showApple = Capacitor.getPlatform() === "ios";
+  return (
+    <div className="bg-white rounded-2xl shadow-sm p-4 space-y-3">
+      <div>
+        <div className="text-sm font-semibold">👤 會員帳號</div>
+        <div className="text-xs text-gray-400 mt-1 leading-relaxed">
+          先登入以確認綁定此 Firebase UID 的會籍；登入唔會自動覆蓋本機資料。
+        </div>
+      </div>
+      {connected ? (
+        <>
+          <div className="flex items-center gap-2 text-xs bg-green-50 text-green-700 px-3 py-2.5 rounded-xl">
+            {fbDrive.fbUser.photoURL && <img src={fbDrive.fbUser.photoURL} className="w-5 h-5 rounded-full flex-shrink-0" alt=""/>}
+            <span className="truncate">已登入 {fbDrive.fbUser.email}</span>
+          </div>
+          <div className="text-xs text-amber-600 bg-amber-50 px-3 py-2 rounded-xl">
+            此帳號暫未確認到有效 Premium 會籍。
+          </div>
+          <button onClick={fbDrive.disconnect}
+            className="w-full py-2 rounded-xl text-xs text-gray-500 bg-gray-50 active:opacity-80">
+            登出會員帳號
+          </button>
+        </>
+      ) : (
+        <>
+          {showApple && (
+            <button onClick={()=>fbDrive.connect("apple")} disabled={fbDrive.syncing}
+              className="w-full py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-50 bg-black">
+               使用 Apple 登入
+            </button>
+          )}
+          <button onClick={()=>fbDrive.connect("google")} disabled={fbDrive.syncing}
+            className="w-full py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-50 bg-[#4285F4]">
+            {fbDrive.syncing ? "登入中…" : "使用 Google 帳號登入"}
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
+function DataSettings({store, setStore, fbDrive, isPremium, onUpgrade}) {
   const [msg, setMsg] = useState("");
   const [dialog, setDialog] = useState(null); // {title, message, onConfirm, danger}
   const flash = (m, isErr=false) => { setMsg({text:m, err:isErr}); setTimeout(()=>setMsg(null),3000); };
@@ -2988,7 +3201,7 @@ function DataSettings({store, setStore, fbDrive}) {
     const csv = exportCSV(store);
     const a = document.createElement("a");
     a.href = "data:text/csv;charset=utf-8,\uFEFF" + encodeURIComponent(csv);
-    a.download = `akr_backup_${new Date().toISOString().slice(0,10)}.csv`;
+    a.download = `qys_backup_${new Date().toISOString().slice(0,10)}.csv`;
     a.click();
     flash("✅ 已匯出 " + count + " 筆資料");
   };
@@ -3011,30 +3224,6 @@ function DataSettings({store, setStore, fbDrive}) {
     reader.readAsText(file,"UTF-8");
   };
 
-  const importCSV = (e) => {
-    const file = e.target.files[0]; if(!file) return;
-    e.target.value="";
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const result = importZaimCSV(ev.target.result, store);
-      if (!result) { flash("❌ CSV 格式無法識別", true); return; }
-      const count = result.imported;
-      showConfirm({
-        title: "確認匯入 Zaim CSV",
-        message: `解析到 ${count} 筆記帳資料。
-將新增至現有 ${store.entries.length} 筆記錄中（不覆蓋）。`,
-        confirmLabel: `匯入 ${count} 筆`,
-        danger: false,
-        onConfirm: () => {
-          closeDialog();
-          setStore(s=>({...s, entries:result.entries, categories:result.categories, _lastModified: new Date().toISOString()}));
-          flash("✅ 成功匯入 " + count + " 筆");
-        }
-      });
-    };
-    reader.readAsText(file, "UTF-8");
-  };
-
   const clearAll = () => {
     showConfirm({
       title: "⚠️ 清除全部資料",
@@ -3046,6 +3235,24 @@ function DataSettings({store, setStore, fbDrive}) {
         setStore({...defaultStore(), _lastModified: new Date().toISOString()});
         flash("🗑️ 已清除全部資料");
       }
+    });
+  };
+
+  const deleteAccount = () => {
+    showConfirm({
+      title: "刪除帳戶及雲端資料",
+      message: "會永久刪除呢個 Google 登入帳戶喺手機版建立嘅所有雲端帳本。手機本機記錄會保留，操作完成後不能復原。",
+      confirmLabel: "永久刪除",
+      danger: true,
+      onConfirm: async () => {
+        closeDialog();
+        try {
+          await fbDrive.deleteCloudAccount();
+          flash("✅ 帳戶及雲端資料已刪除");
+        } catch (e) {
+          flash("❌ 刪除失敗：" + (e.message || "請重新登入後再試"), true);
+        }
+      },
     });
   };
 
@@ -3062,24 +3269,40 @@ function DataSettings({store, setStore, fbDrive}) {
     />
     <div className="space-y-3">
       {msg&&<div className={`text-sm px-4 py-3 rounded-2xl text-center font-medium ${msg.err?"bg-red-50 text-red-600":"bg-green-50 text-green-700"}`}>{msg.text}</div>}
-      <FirebaseSyncPanel fbDrive={fbDrive} dataModified={store._lastModified} />
+      {isPremium ? (
+        <FirebaseSyncPanel fbDrive={fbDrive} dataModified={store._lastModified} />
+      ) : (
+        <>
+          <FirebaseMembershipLogin fbDrive={fbDrive} />
+          <PremiumGate title="雲端同步與換機恢復" description="Premium 以 Google 帳號安全同步帳本資料。" onUpgrade={onUpgrade}/>
+        </>
+      )}
 
       <div className="bg-white rounded-2xl shadow-sm p-4 space-y-3">
         <div className="text-sm font-semibold">資料備份</div>
         <button onClick={doExportCSV} className="w-full py-3 rounded-xl text-sm font-medium text-white" style={{background:"var(--brand)"}}>📤 匯出 CSV 備份</button>
-        <label className="block w-full py-3 rounded-xl text-sm font-medium text-center border-2 border-dashed border-gray-200 text-gray-500 cursor-pointer hover:border-[color:var(--brand)]">
-          📥 匯入 CSV 備份
-          <input type="file" accept=".csv,.txt" className="hidden" onChange={doImportCSV}/>
-        </label>
-        <label className="block w-full py-3 rounded-xl text-sm font-medium text-center border-2 border-dashed border-gray-200 text-gray-500 cursor-pointer hover:border-[color:var(--brand)]">
-          📊 匯入 Zaim CSV
-          <input type="file" accept=".csv,.txt" className="hidden" onChange={importCSV}/>
-        </label>
+        {isPremium ? (
+          <>
+            <label className="block w-full py-3 rounded-xl text-sm font-medium text-center border-2 border-dashed border-gray-200 text-gray-500 cursor-pointer hover:border-[color:var(--brand)]">
+              📥 匯入 CSV 備份
+              <input type="file" accept=".csv,.txt" className="hidden" onChange={doImportCSV}/>
+            </label>
+          </>
+        ) : (
+          <button onClick={onUpgrade} className="w-full py-3 rounded-xl text-sm font-semibold bg-amber-50 text-amber-700">
+            ✨ Premium 解鎖 CSV 匯入
+          </button>
+        )}
       </div>
       <div className="bg-white rounded-2xl shadow-sm p-4">
         <div className="text-sm font-semibold mb-3">統計</div>
         <div className="text-sm text-gray-500">總記帳筆數：<span className="font-semibold text-gray-800">{store.entries.length}</span></div>
       </div>
+      {fbDrive.fbUser && (
+        <button onClick={deleteAccount} className="w-full py-3 rounded-xl text-sm font-medium text-red-500 border border-red-100 bg-white">
+          刪除帳戶及所有雲端資料
+        </button>
+      )}
       <button onClick={clearAll} className="w-full py-3 rounded-xl text-sm font-medium text-red-500 bg-red-50">🗑️ 清除全部資料</button>
     </div>
     </>
@@ -3095,11 +3318,15 @@ function CalcPad({expr, onKey}) {
     ["AC","0",".","＋"],
   ];
   const btnBase = "flex items-center justify-center rounded-2xl text-xl font-semibold active:scale-90 transition-transform duration-75 select-none";
+  const pressKey = key => {
+    lightHaptic();
+    onKey(key);
+  };
   return (
     <div className="flex-shrink-0 bg-white border-t border-gray-100 pad-enter">
       <div className="grid grid-cols-4 gap-2 p-3 pb-1.5">
         {rows.map((row,ri)=>row.map(k=>(
-          <button key={ri+k} onPointerDown={e=>{e.preventDefault();onKey(k);}}
+          <button key={ri+k} onPointerDown={e=>{e.preventDefault();pressKey(k);}}
             className={`${btnBase} h-14 ${k==="AC"?"bg-red-50 text-red-400":["÷","×","−","＋"].includes(k)?"text-[color:var(--brand)]":"bg-gray-100 text-gray-700"}`}
             style={["÷","×","−","＋"].includes(k)?{background:"var(--brand-soft)"}:{}}>
             {k}
@@ -3107,11 +3334,11 @@ function CalcPad({expr, onKey}) {
         )))}
       </div>
       <div className="grid grid-cols-3 gap-2 px-3 pb-3">
-        <button onPointerDown={e=>{e.preventDefault();onKey("⌫");}}
+        <button onPointerDown={e=>{e.preventDefault();pressKey("⌫");}}
           className={`${btnBase} h-14 bg-gray-100 text-gray-700`}>⌫</button>
-        <button onPointerDown={e=>{e.preventDefault();onKey("=");}}
+        <button onPointerDown={e=>{e.preventDefault();pressKey("=");}}
           className={`${btnBase} h-14 bg-gray-200 text-gray-700`}>=</button>
-        <button onPointerDown={e=>{e.preventDefault();onKey("✓");}}
+        <button onPointerDown={e=>{e.preventDefault();pressKey("✓");}}
           className={`${btnBase} h-14 text-white`} style={{background:"linear-gradient(135deg,var(--brand-from),var(--brand-to))"}}>完成</button>
       </div>
     </div>
@@ -3202,7 +3429,7 @@ function EntryModal({entry, store, base, rates, onSave, onDelete, onClose, close
       confirmLabel="刪除" danger={true}
       onConfirm={()=>{ setDelConfirm(false); onDelete(entry.id); }}
       onCancel={()=>setDelConfirm(false)}/>
-    <div className={`fixed inset-0 z-40 bg-white flex flex-col sheet ${exiting?"sheet-exit":""}`}
+    <div className={`fixed inset-0 z-40 bg-white flex flex-col sheet fullscreen-safe-top ${exiting?"sheet-exit":""}`}
       onClick={()=>setCalcOpen(false)}>
       {/* Header */}
       <div className="px-4 py-4 flex items-center justify-between border-b border-gray-100 flex-shrink-0">
@@ -3333,7 +3560,7 @@ function EntryModal({entry, store, base, rates, onSave, onDelete, onClose, close
 /* ===================== 啟動 ===================== */
 createRoot(document.getElementById("root")).render(<App/>);
 
-if ("serviceWorker" in navigator) {
+if (!isNative() && "serviceWorker" in navigator) {
   let refreshing = false;
   navigator.serviceWorker.addEventListener("controllerchange", () => {
     if (refreshing) return;
@@ -3358,4 +3585,3 @@ if ("serviceWorker" in navigator) {
     });
   }).catch(e => reportError("Service Worker 註冊失敗", e));
 }
-

@@ -8,6 +8,7 @@
       <rect width="512" height="512" rx="112" ry="112"/>
     </clipPath>
   </defs>
+  <rect width="512" height="512" fill="#0EA5E9"/>
   <rect width="512" height="512" rx="112" fill="url(#bg)"/>
   <g clip-path="url(#clip)">
     <rect x="72" y="110" width="368" height="200" rx="24" fill="white" opacity="0.15"/>
@@ -16,6 +17,6 @@
     <rect x="110" y="240" width="255" height="16" rx="8" fill="white" opacity="0.6"/>
     <circle cx="370" cy="210" r="52" fill="white" opacity="0.2"/>
     <circle cx="370" cy="210" r="44" fill="none" stroke="white" stroke-width="4" opacity="0.55"/>
-    <text x="256" y="460" font-size="148" text-anchor="middle" fill="white" font-family="Arial Black,Arial,sans-serif" font-weight="900" letter-spacing="-4">AKR</text>
+    <text x="256" y="460" font-size="132" text-anchor="middle" fill="white" font-family="Arial Black,Arial,sans-serif" font-weight="900" letter-spacing="-4">QYS</text>
   </g>
 </svg>

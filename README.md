@@ -1,145 +1,35 @@
-# AKR 記帳本
+# 錢有數 PWA
 
-> 繁體中文個人記帳 PWA，支援多幣值、自訂分類、預算管理、圖表分析、可自訂頁面佈局及跨裝置雲端同步。
+繁體中文個人記帳 PWA，與 Android／iPhone 版共用同一個 Firebase 帳號、會員狀態及雲端帳本格式。
 
-🔗 **立即使用**：https://akira1102-creat.github.io/akr-ledger/
+立即使用：https://akira1102-creat.github.io/akr-ledger/
 
----
+## 功能
 
-## 功能總覽
+- 免費基本記帳、月曆、本月摘要、預算及 CSV 匯出
+- Premium 完整圖表、多帳本、自訂分類與版面、自動匯率及 Google 雲端同步
+- 使用 Firebase UID 辨認會員，換裝置及使用 PWA 時保持同一會籍
+- 沿用 `akr_ledger` 雲端資料格式，相容舊式單帳本及多帳本文件
+- 支援離線快取及安裝到手機主畫面
 
-### 💰 記帳
-- 收入／支出記錄，支援備註、日期、幣值選擇
-- 自訂計算盤輸入金額（不彈出系統鍵盤），支援加減乘除運算
-- 快速日期按鈕：今天 / 昨天 / 前天，一鍵填入
-- 左滑記帳項目顯示紅色刪除按鈕，附確認彈窗防止誤觸
-- 刪除後底部顯示「撤銷」Toast，5 秒內可復原
-- 長按記帳項目快速複製為新記錄（自動帶入今日日期）
+## 會員與購買
 
-### 🔍 搜尋與分頁
-- 首頁底部搜尋欄，即時過濾備注、分類名稱、金額
-- 搜尋時自動跨越所有月份，並標示「顯示所有月份的搜尋結果」
-- 記帳列表以日期分組，今日／昨日顯示標籤，支援「顯示更多」分頁載入
-
-### 🗂️ 分類管理
-- 兩層分類結構：大類（圖示＋顏色）+ 子分類
-- 新增、刪除、長按拖拉排序
-- 記帳時以左右雙欄面板選擇大類與子分類
-- 圖表與預算以大類為單位計算；記帳記錄儲存至子分類
-
-### 📊 圖表分析
-- 週／月／年切換，長條圖顯示收支走勢
-- **近 6 個月趨勢圖**（月份視圖）：一覽跨月收支變化
-- 圓餅圖（Donut）：按支出大類分佈，同色系自動去重避免撞色
-- 點擊大類可鑽入子分類明細（sub-donut）
-- 各大類預算進度條，超額顯示紅色警示
-
-### 📅 月曆視圖
-- 月曆點擊任意日期查看當日記錄
-- 開啟月曆頁時自動顯示今天的記錄
-
-### 🏠 主頁摘要
-- 月份標題可點擊彈出月份選擇器，左右箭頭切換月份
-- 本月收入／支出／結餘總覽，附迷你 Donut 圖顯示支出分類佔比
-- 支出概況：本月／本週／今日預算使用進度，超支顯示紅色警示
-  - 本週預算按當週實際天數靜態計算，每週日更新
-  - 今日預算 = 月份剩餘預算 ÷ 本月剩餘天數（動態每日更新）
-- 記帳列表按日期分組，金額數字變動時有滑入動畫
-
-### 💳 預算管理
-- 設定月度總預算，可選擇是否將預算納入結餘計算
-- 各大類可設定獨立月度上限，圖表頁顯示進度條
-- 超支時顯示橙色警示
-
-### 💱 多幣值
-- 支援 MOP、HKD、CNY、JPY、TWD
-- 每筆記帳可選用不同幣值，自動換算至基準幣值顯示
-- 手動編輯任一幣種匯率，其餘自動按比例調整
-- 一鍵同步最新匯率（Open Exchange Rates）
-
-### 🔔 記帳提醒
-- 可開啟推送通知提醒
-- 超過 1 日未記帳，下次開啟 App 時自動提示
-
-### 📐 頁面佈局設定
-- 首頁、月曆、圖表三個分頁的卡片順序均可自由調整
-- 長按 ☰ 圖示拖拉排序；右側開關控制個別卡片顯示／隱藏
-- 佈局設定儲存至本機並自動同步雲端
-
-### 🎨 主題
-- **主題色**：珊瑚粉 / 天藍（預設），即時切換全局品牌色
-- **深淺設定**：淺色 / 深色 / 跟隨系統，設定儲存於本機
-
-### 📤 數據備份
-- **CSV 匯出**：匯出所有記帳記錄為標準 CSV，可用 Excel 開啟
-- **CSV 匯入**：支援 AKR 格式及 Zaim 格式 CSV 匯入
-- **GitHub Gist 雲端同步**：免費跨裝置同步，詳見下方說明
-
-### ☁️ 雲端同步（GitHub Gist）
-- 免帳號，使用 GitHub Personal Access Token（PAT）
-- 1.5 秒防抖自動上傳，啟動時自動比對雲端最新版本
-- 支援手動立即同步，標頭顯示同步狀態與時間
-
-### 📱 PWA
-- 安裝到手機主畫面，完全離線可用
-- 主畫面長按圖示可直接「新增記帳」（Shortcut 捷徑）
-- Android：硬件返回鍵支援各層 back navigation
-- iOS：左滑手勢返回上一層
-
----
-
-## 安裝到手機
-
-**Android（Chrome）**
-1. 用 Chrome 開啟網址
-2. 右上角選單 → 「加至主畫面」或「安裝應用程式」
-
-**iOS（Safari）**
-1. 用 **Safari** 開啟網址（iOS 限定 Safari 才支援 PWA）
-2. 底部分享按鈕 → 「加入主畫面」
-
----
-
-## 雲端同步設定（選用）
-
-1. 登入 [GitHub](https://github.com)，前往 [Settings → Developer settings → Personal access tokens → Tokens (classic)](https://github.com/settings/tokens)
-2. 點「Generate new token (classic)」，勾選 **`gist`** 權限，生成並複製 Token
-3. 開啟 App → 設定 → 數據與同步 → 雲端同步 → 貼上 Token → 連接
-4. 完成，之後每次修改會自動同步
-
-**換機恢復**：在新裝置輸入同一個 Token，App 會自動找到備份並導入。
-
----
+- 使用者必須先登入 Firebase 帳號，手機 App 才會顯示商店訂閱計劃。
+- Google Play／Apple App Store 負責付款，RevenueCat webhook 由 Firebase 後端更新會員狀態。
+- PWA 不直接出售 App Store／Google Play 訂閱，只會讀取已綁定 Firebase UID 的 Premium 會籍。
+- 用戶端只可以讀取自己嘅會員文件，無權自行寫入或提升會籍。
 
 ## 本機開發
 
-```bash
-git clone https://github.com/akira1102-creat/akr-ledger.git
-cd akr-ledger
-python -m http.server 8080
-# 開啟 http://localhost:8080
+```powershell
+npm.cmd install
+npm.cmd run dev
 ```
 
-無需 Node.js、npm 或任何 build 工具。
+正式建立及發布根目錄靜態檔案：
 
----
+```powershell
+npm.cmd run build
+```
 
-## 技術棧
-
-| 技術 | 用途 |
-|---|---|
-| React 18 UMD + Babel Standalone | UI 框架（瀏覽器直接執行 JSX） |
-| Tailwind CSS Play CDN | 樣式（Dark Mode via `class` 策略） |
-| Service Worker | 離線快取（HTML 網路優先 / 靜態快取優先 / CDN SWR） |
-| localStorage | 本機數據儲存 |
-| GitHub Gist API | 雲端備份同步 |
-| Open Exchange Rates | 匯率數據 |
-| Web Notifications API | 記帳提醒推送 |
-
----
-
-## 數據隱私
-
-- 所有記帳數據儲存於**你的裝置本機**（localStorage）
-- 雲端同步備份至**你自己的** GitHub Gist（私密），只有你能存取
-- 不經過任何第三方伺服器，Token 只存在本機
+Firebase Web 設定存放於本機 `.env`，唔會加入 Git。
