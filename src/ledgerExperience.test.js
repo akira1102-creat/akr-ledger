@@ -19,6 +19,13 @@ test("無記錄時提供可直接使用的香港快速範本", () => {
   assert.deepEqual(templates.map(item => item.paymentMethod), ["octopus", "octopus", "cash"]);
 });
 
+test("自訂付款方式移除預設方式後，快速範本不會引用失效方式", () => {
+  const templates = buildQuickTemplates([], categories, "MOP", [
+    { id: "cash", label: "現金", icon: "💵" },
+  ]);
+  assert.deepEqual(templates.map(item => item.paymentMethod), ["", "", "cash"]);
+});
+
 test("每週洞察正確比較今週與上週", () => {
   const insight = getWeeklyInsight([
     { type: "expense", date: "2026-07-20", amount: 80 },

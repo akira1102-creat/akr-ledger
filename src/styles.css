@@ -126,15 +126,15 @@
     padding:0 11px; border:1px solid #e5e7eb; border-radius:13px;
     color:#64748b; background:#fff; font-size:12px; font-weight:700;
   }
-  .payment-method-active { border-color:var(--brand); color:var(--brand); background:var(--brand-soft); }
-  .quick-category-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:7px; }
+  .payment-method-active { border-color:var(--brand); color:var(--brand); background:var(--brand-soft); box-shadow:0 0 0 1px var(--brand); }
+  .quick-category-grid { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:5px; }
   .quick-category {
     display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px;
-    min-height:62px; min-width:0; border:1px solid #e5e7eb; border-radius:14px;
-    color:#64748b; background:#fff; font-size:10px; font-weight:700;
+    min-height:50px; min-width:0; border:1px solid #e5e7eb; border-radius:12px;
+    color:#64748b; background:#fff; font-size:9px; font-weight:700;
   }
-  .quick-category > span:last-child { width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding:0 4px; }
-  .quick-category > span:first-child { font-size:20px; }
+  .quick-category > span:last-child { width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding:0 2px; }
+  .quick-category > span:first-child { font-size:17px; }
   .quick-category-active { border-color:var(--category-color); color:#334155; background:color-mix(in srgb, var(--category-color) 18%, white); }
   .more-details-button {
     display:flex; align-items:center; justify-content:space-between; width:100%; min-height:44px;
@@ -154,6 +154,7 @@
   html.dark .weekly-insight-positive { color:#a7f3d0; background:#10352d; }
   html.dark .weekly-insight-warning { color:#fde68a; background:#3c2c15; }
   html.dark .payment-method, html.dark .quick-category, html.dark .more-details-button { background:#1f2937; border-color:#475569; color:#cbd5e1; }
+  html.dark .payment-method-active { border-color:var(--brand); color:var(--brand); background:var(--brand-soft); box-shadow:0 0 0 1px var(--brand); }
   html.dark .quick-category-active { background:color-mix(in srgb, var(--category-color) 22%, #1f2937); color:#f8fafc; }
   html.dark .detail-panel { background:#111827; }
   html.dark .privacy-status-card { border-color:#235345; color:#a7f3d0; background:#10352d; }

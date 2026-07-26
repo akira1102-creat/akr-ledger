@@ -494,6 +494,7 @@ const saveActiveProfileId = id => {
 const defaultStore = () => ({
   entries: [],
   categories: { expense: DEFAULT_EXPENSE_CATS, income: DEFAULT_INCOME_CATS },
+  paymentMethods: PAYMENT_METHODS.map(method => ({...method})),
   budgets: {},
   totalBudget: 0,
   settings: { baseCurrency:"MOP", rates: DEFAULT_RATES },
@@ -520,6 +521,9 @@ const normalizeStore = (s) => {
   if (!s.monthlyBudgets) s.monthlyBudgets = {};
   if (s.useMonthlyBudget == null) s.useMonthlyBudget = false;
   if (!s.categories?.expense) s.categories = defaultStore().categories;
+  if (!Array.isArray(s.paymentMethods) || s.paymentMethods.length === 0) {
+    s.paymentMethods = PAYMENT_METHODS.map(method => ({...method}));
+  }
   if (!s.settings) s.settings = defaultStore().settings;
   if (s.settings.noDecimals == null) s.settings.noDecimals = false;
   if (s.settings.weekStart == null) s.settings.weekStart = "mon";
@@ -607,9 +611,10 @@ const csvEscape = value => {
 
 function exportCSV(store) {
   const catMap = [...store.categories.expense,...store.categories.income].reduce((m,c)=>{m[c.id]=c;return m;},{});
+  const paymentMethods = store.paymentMethods || PAYMENT_METHODS;
   const rows = store.entries.map(e=>{
     const cat=catMap[e.category]||{name:"未分類"};
-    const payment = PAYMENT_METHODS.find(method=>method.id===e.paymentMethod)?.label || "";
+    const payment = paymentMethods.find(method=>method.id===e.paymentMethod)?.label || "";
     return [e.date, e.type==="expense"?"支出":"收入", e.amount, e.currency, cat.name, e.memo||"", payment].map(csvEscape).join(",");
   });
   return [["日期","類型","金額","幣種","分類","備注","付款方式"].map(csvEscape).join(","),...rows].join("\n");
@@ -619,6 +624,7 @@ function importOurCSV(text, store) {
   if(lines.length<2) return null;
   if(!lines[0].includes("日期")||!lines[0].includes("金額")) return null;
   const catMap = [...store.categories.expense,...store.categories.income].reduce((m,c)=>{m[c.name]=c;return m;},{});
+  const paymentMethods = store.paymentMethods || PAYMENT_METHODS;
   const entries=[...store.entries]; let imported=0;
   for(let i=1;i<lines.length;i++){
     const cols=parseCSVRow(lines[i]);
@@ -627,7 +633,7 @@ function importOurCSV(text, store) {
     const amount=parseFloat(amtStr); if(isNaN(amount)||!date) continue;
     const type=typeStr==="收入"?"income":"expense";
     const cat=catMap[catName?.trim()];
-    const paymentMethod = PAYMENT_METHODS.find(method=>method.label===paymentLabel?.trim())?.id || "";
+    const paymentMethod = paymentMethods.find(method=>method.label===paymentLabel?.trim())?.id || "";
     entries.push({id:`imp_${Date.now()}_${i}`,date,type,amount,currency:currency?.trim()||"MOP",category:cat?.id||"",memo:memo?.trim()||"",paymentMethod});
     imported++;
   }
@@ -1492,8 +1498,8 @@ function HomeView({store, rates, base, entries, allEntries, onQuickAdd, onEdit, 
 
   const [ym1,ym2] = viewMonth.split("-");
   const quickTemplates = useMemo(
-    ()=>buildQuickTemplates(allEntries, store.categories.expense, base),
-    [allEntries, store.categories.expense, base],
+    ()=>buildQuickTemplates(allEntries, store.categories.expense, base, store.paymentMethods),
+    [allEntries, store.categories.expense, base, store.paymentMethods],
   );
   const weeklyInsight = useMemo(
     ()=>getWeeklyInsight(allEntries, {
@@ -1683,7 +1689,7 @@ function HomeView({store, rates, base, entries, allEntries, onQuickAdd, onEdit, 
         <div className="quick-template-grid">
           {quickTemplates.map((template,index)=>{
             const category=store.categories.expense.find(item=>item.id===template.category) || {};
-            const method=PAYMENT_METHODS.find(item=>item.id===template.paymentMethod);
+            const method=(store.paymentMethods || PAYMENT_METHODS).find(item=>item.id===template.paymentMethod);
             return (
               <button key={`${template.category}-${index}`} onClick={()=>onQuickAdd(template)} className="quick-template">
                 <span className="quick-template-icon">{category.icon||"💸"}</span>
@@ -2311,7 +2317,7 @@ function OtherView({store, setStore}) {
     }
   };
   const aboutRows = [
-    ["版本","v2.4.260726",false],
+    ["版本","v2.4.1",false],
     ["製作者","AKiRa",true],
     ["技術","React · Capacitor",false],
     ["支援幣種","MOP · HKD · CNY · JPY · TWD",false],
@@ -2716,7 +2722,7 @@ function SettingsView({store, setStore, fbDrive, profiles, activeProfileId, onSw
     {key:"premium",icon:"✨", label:subscription.isPremium?"Premium 使用中":"升級 Premium", desc:"訂閱、恢復購買及管理計劃", bg:"#FFFBEB"},
     {key:"profile",icon:"👤", label:"帳本 / 用戶", desc:"切換或新增獨立記帳用戶",       bg:"#EEF2FF"},
     {key:"layout",icon:"📐", label:"頁面佈局",   desc:"調整首頁、月曆、圖表的卡片順序及顯示", bg:"#F0F4FF"},
-    {key:"cat",   icon:"🏷️", label:"分類管理",   desc:"新增、編輯、排序收支分類",     bg:"#FFF0F3"},
+    {key:"cat",   icon:"🏷️", label:"分類管理",   desc:"編輯收支分類及付款方式",       bg:"#FFF0F3"},
     {key:"budget",icon:"💰", label:"預算設定",   desc:"設定月度總預算及各分類上限",   bg:"#F0FFF4"},
     {key:"data",  icon:"📁", label:"數據與同步", desc:"備份、匯入匯出、雲端同步",     bg:"#EFF6FF"},
     {key:"basic", icon:"💱", label:"幣值設定",   desc:"基準幣值與匯率管理",           bg:"#FFFBEB"},
@@ -2753,7 +2759,7 @@ function SettingsView({store, setStore, fbDrive, profiles, activeProfileId, onSw
         {tab==="premium" && <PremiumView subscription={subscription} fbDrive={fbDrive} onRefreshMembership={refreshMembership}/>}
         {tab==="profile" && <ProfileSettings profiles={profiles} activeProfileId={activeProfileId} onSwitchProfile={onSwitchProfile} onCreateProfile={onCreateProfile} onRenameProfile={onRenameProfile} onDeleteProfile={onDeleteProfile} isPremium={subscription.isPremium} onUpgrade={onUpgrade}/>}
         {tab==="layout" && (subscription.isPremium ? <LayoutSettings store={store} setStore={setStore}/> : <PremiumGate title="自訂頁面佈局" description="Premium 可以調整卡片順序同顯示內容。" onUpgrade={onUpgrade}/>)}
-        {tab==="cat"    && (subscription.isPremium ? <CatSettings store={store} setStore={setStore}/> : <PremiumGate title="自訂收支分類" description="Premium 可以新增、編輯同排序兩層分類。" onUpgrade={onUpgrade}/>)}
+        {tab==="cat"    && (subscription.isPremium ? <CatSettings store={store} setStore={setStore}/> : <PremiumGate title="自訂分類及付款方式" description="Premium 可以編輯收支分類同付款方式。" onUpgrade={onUpgrade}/>)}
         {tab==="budget" && <BudgetSettings store={store} setStore={setStore}/>}
         {tab==="data"   && <DataSettings store={store} setStore={setStore} fbDrive={fbDrive} isPremium={subscription.isPremium} onUpgrade={onUpgrade}/>}
         {tab==="basic"  && <BasicSettings store={store} setStore={setStore} isPremium={subscription.isPremium} onUpgrade={onUpgrade}/>}
@@ -2887,9 +2893,11 @@ function BasicSettings({store, setStore, isPremium, onUpgrade}) {
 }
 
 function CatSettings({store, setStore}) {
+  const [section, setSection] = useState("category");
   const [type, setType] = useState("expense");
   const cats = store.categories[type];
   const parentCats = cats.filter(c=>!c.parentId);
+  const paymentMethods = store.paymentMethods || PAYMENT_METHODS;
 
   const updateCat = (id, field, val) =>
     setStore(s=>({...s, categories:{...s.categories, [type]:s.categories[type].map(c=>c.id===id?{...c,[field]:val}:c)}}));
@@ -2947,8 +2955,76 @@ function CatSettings({store, setStore}) {
     });
   };
 
+  const updatePaymentMethod = (id, field, value) => {
+    const nextValue = field === "icon" ? value.trim().slice(0,4) : value.slice(0,12);
+    setStore(s=>({
+      ...s,
+      paymentMethods:(s.paymentMethods || PAYMENT_METHODS).map(method=>
+        method.id===id ? {...method,[field]:nextValue} : method
+      ),
+      _lastModified:new Date().toISOString(),
+    }));
+  };
+
+  const addPaymentMethod = () => {
+    if (paymentMethods.length >= 12) {
+      window.alert("最多可以設定 12 個付款方式。");
+      return;
+    }
+    const method = {id:`payment_${Date.now()}`, label:"新付款方式", icon:"💳"};
+    setStore(s=>({...s,paymentMethods:[...(s.paymentMethods || PAYMENT_METHODS),method],_lastModified:new Date().toISOString()}));
+  };
+
+  const deletePaymentMethod = method => {
+    if (paymentMethods.length <= 1) {
+      window.alert("最少要保留一個付款方式。");
+      return;
+    }
+    if (store.entries.some(entry=>entry.paymentMethod===method.id)) {
+      window.alert(`「${method.label}」仍然有記帳記錄使用，請先更改相關記錄後再刪除。`);
+      return;
+    }
+    if (!window.confirm(`確定刪除「${method.label}」付款方式？`)) return;
+    setStore(s=>({...s,paymentMethods:(s.paymentMethods || PAYMENT_METHODS).filter(item=>item.id!==method.id),_lastModified:new Date().toISOString()}));
+  };
+
   return (
     <div className="space-y-3">
+      <div className="bg-white rounded-2xl shadow-sm p-1 flex gap-1">
+        {[["category","收支分類"],["payment","付款方式"]].map(([key,label])=>(
+          <button key={key} onClick={()=>setSection(key)}
+            className={`flex-1 py-2 rounded-xl text-sm ${section===key?"bg-[color:var(--brand-soft)] text-[color:var(--brand)] font-semibold":"bg-gray-100 text-gray-500"}`}>
+            {label}
+          </button>
+        ))}
+      </div>
+      {section==="payment" ? (
+        <>
+          <div className="text-[11px] text-gray-400 px-1">點擊圖示或名稱可修改；有記帳記錄使用嘅方式會保留，避免舊資料失去標示。</div>
+          <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
+            {paymentMethods.map((method,index)=>(
+              <div key={method.id} className={`flex items-center gap-3 px-3 py-3 ${index>0?"border-t border-gray-100":""}`}>
+                <div className="w-10 h-10 rounded-xl grid place-items-center flex-shrink-0" style={{background:"var(--brand-soft)"}}>
+                  <input aria-label={`${method.label}圖示`} type="text" value={method.icon}
+                    onChange={e=>updatePaymentMethod(method.id,"icon",e.target.value)}
+                    className="w-8 text-center text-xl bg-transparent border-0 outline-none"/>
+                </div>
+                <input aria-label="付款方式名稱" type="text" value={method.label}
+                  onChange={e=>updatePaymentMethod(method.id,"label",e.target.value)}
+                  onBlur={()=>{if(!method.label.trim()) updatePaymentMethod(method.id,"label","未命名");}}
+                  className="flex-1 min-w-0 text-sm font-semibold bg-gray-50 rounded-xl px-3 py-2"/>
+                <button aria-label={`刪除${method.label}`} onClick={()=>deletePaymentMethod(method)}
+                  className="text-gray-300 hover:text-red-400 text-base flex-shrink-0 px-1 active:scale-90 transition-transform">🗑️</button>
+              </div>
+            ))}
+          </div>
+          <button onClick={addPaymentMethod}
+            className="w-full py-3 rounded-2xl border-2 border-dashed border-gray-200 text-sm text-gray-400 hover:border-[color:var(--brand)] hover:text-[color:var(--brand)] flex items-center justify-center gap-2 active:bg-gray-50">
+            <span className="text-lg leading-none">＋</span> 新增付款方式
+          </button>
+        </>
+      ) : (
+        <>
       <div className="bg-white rounded-2xl shadow-sm p-1 flex gap-1">
         {[["expense","支出"],["income","收入"]].map(([t,l])=>(
           <button key={t} onClick={()=>setType(t)}
@@ -3022,6 +3098,8 @@ function CatSettings({store, setStore}) {
         className="w-full py-3 rounded-2xl border-2 border-dashed border-gray-200 text-sm text-gray-400 hover:border-[color:var(--brand)] hover:text-[color:var(--brand)] flex items-center justify-center gap-2 active:bg-gray-50">
         <span className="text-lg leading-none">＋</span> 新增分類
       </button>
+        </>
+      )}
     </div>
   );
 }
@@ -3410,6 +3488,7 @@ function EntryModal({entry, seed, store, base, rates, onSave, onDelete, onClose,
   const [date, setDate] = useState(initial.date || today);
   const [memo, setMemo] = useState(initial.memo || "");
   const [paymentMethod, setPaymentMethod] = useState(initial.paymentMethod || "");
+  const paymentMethods = store.paymentMethods || PAYMENT_METHODS;
   const [calcOpen, setCalcOpen] = useState(!initial.amount);
   const [calcExpr, setCalcExpr] = useState(initial.amount ? String(initial.amount) : "");
   const [showDetails, setShowDetails] = useState(isEdit);
@@ -3525,10 +3604,11 @@ function EntryModal({entry, seed, store, base, rates, onSave, onDelete, onClose,
         <div>
           <div className="text-sm text-gray-500 mb-2">付款方式 <span className="text-gray-300">（選填）</span></div>
           <div className="payment-methods">
-            {PAYMENT_METHODS.map(method=>(
-              <button key={method.id} onClick={()=>setPaymentMethod(value=>value===method.id?"":method.id)}
+            {paymentMethods.map(method=>(
+              <button key={method.id} aria-pressed={paymentMethod===method.id}
+                onClick={event=>{event.stopPropagation();setPaymentMethod(value=>value===method.id?"":method.id);}}
                 className={`payment-method ${paymentMethod===method.id?"payment-method-active":""}`}>
-                <span>{method.icon}</span><span>{method.label}</span>
+                <span>{method.icon}</span><span>{method.label}</span>{paymentMethod===method.id&&<span aria-hidden="true">✓</span>}
               </button>
             ))}
           </div>

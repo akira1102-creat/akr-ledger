@@ -12,8 +12,9 @@ const FALLBACK_TEMPLATES = [
   { type: "expense", category: "drink", amount: 28, paymentMethod: "cash", memo: "飲品" },
 ];
 
-export function buildQuickTemplates(entries = [], categories = [], baseCurrency = "MOP") {
+export function buildQuickTemplates(entries = [], categories = [], baseCurrency = "MOP", paymentMethods = PAYMENT_METHODS) {
   const categoryIds = new Set(categories.map(category => category.id));
+  const paymentMethodIds = new Set(paymentMethods.map(method => method.id));
   const seen = new Set();
   const templates = [];
   const candidates = [...entries]
@@ -40,7 +41,11 @@ export function buildQuickTemplates(entries = [], categories = [], baseCurrency 
     const key = `${fallback.category}|${fallback.paymentMethod}|${fallback.memo}|${fallback.amount}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    templates.push({ ...fallback, currency: baseCurrency });
+    templates.push({
+      ...fallback,
+      currency: baseCurrency,
+      paymentMethod: paymentMethodIds.has(fallback.paymentMethod) ? fallback.paymentMethod : "",
+    });
     if (templates.length === 3) break;
   }
   return templates;
