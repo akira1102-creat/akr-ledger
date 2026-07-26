@@ -54,7 +54,7 @@ export default function PremiumView({ subscription, fbDrive, onRefreshMembership
     "Google 雲端同步及跨裝置備份",
     "無限帳本及家庭分帳",
     "完整趨勢、分類及預算分析",
-    "自訂分類、版面及進階匯入",
+    "自訂分類、版面及進階整理",
     "自動匯率及日後新增嘅 Premium 功能",
   ];
 

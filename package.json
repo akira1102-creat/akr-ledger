@@ -1,10 +1,10 @@
 {
   "name": "qys-ledger-pwa",
-  "version": "2.2.2",
+  "version": "2.4.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test src/cloudAccount.test.js",
+    "test": "node --test src/*.test.js",
     "dev": "vite",
     "build": "vite build && node scripts/publish-root.cjs",
     "preview": "vite preview"

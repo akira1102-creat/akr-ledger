@@ -13,6 +13,7 @@ import {
 } from "./cloudAccount";
 import { isNative, lightHaptic, prepareNativeShell, setDailyReminder } from "./native";
 import { useSubscription } from "./subscription";
+import { buildQuickTemplates, getWeeklyInsight, PAYMENT_METHODS } from "./ledgerExperience";
 import "./styles.css";
 
 /* ===================== 常數 ===================== */
@@ -608,9 +609,10 @@ function exportCSV(store) {
   const catMap = [...store.categories.expense,...store.categories.income].reduce((m,c)=>{m[c.id]=c;return m;},{});
   const rows = store.entries.map(e=>{
     const cat=catMap[e.category]||{name:"未分類"};
-    return [e.date, e.type==="expense"?"支出":"收入", e.amount, e.currency, cat.name, e.memo||""].map(csvEscape).join(",");
+    const payment = PAYMENT_METHODS.find(method=>method.id===e.paymentMethod)?.label || "";
+    return [e.date, e.type==="expense"?"支出":"收入", e.amount, e.currency, cat.name, e.memo||"", payment].map(csvEscape).join(",");
   });
-  return [["日期","類型","金額","幣種","分類","備注"].map(csvEscape).join(","),...rows].join("\n");
+  return [["日期","類型","金額","幣種","分類","備注","付款方式"].map(csvEscape).join(","),...rows].join("\n");
 }
 function importOurCSV(text, store) {
   const lines = text.trim().split(/\r?\n/);
@@ -621,11 +623,12 @@ function importOurCSV(text, store) {
   for(let i=1;i<lines.length;i++){
     const cols=parseCSVRow(lines[i]);
     if(cols.length<4) continue;
-    const [date,typeStr,amtStr,currency,catName,memo]=cols;
+    const [date,typeStr,amtStr,currency,catName,memo,paymentLabel]=cols;
     const amount=parseFloat(amtStr); if(isNaN(amount)||!date) continue;
     const type=typeStr==="收入"?"income":"expense";
     const cat=catMap[catName?.trim()];
-    entries.push({id:`imp_${Date.now()}_${i}`,date,type,amount,currency:currency?.trim()||"MOP",category:cat?.id||"",memo:memo?.trim()||""});
+    const paymentMethod = PAYMENT_METHODS.find(method=>method.label===paymentLabel?.trim())?.id || "";
+    entries.push({id:`imp_${Date.now()}_${i}`,date,type,amount,currency:currency?.trim()||"MOP",category:cat?.id||"",memo:memo?.trim()||"",paymentMethod});
     imported++;
   }
   return {entries,categories:store.categories,imported};
@@ -856,6 +859,7 @@ function App() {
   const [entryOpen, setEntryOpen] = useState(false);
   const [entryCloseSignal, setEntryCloseSignal] = useState(0);
   const [editing, setEditing] = useState(null);
+  const [entrySeed, setEntrySeed] = useState(null);
   const [viewMonth, setViewMonth] = useState(() => { const d=new Date(); return monthKey(d); });
   const fbDrive = useFirebaseSync(store, setStore, activeProfile, subscription.isPremium);
   const refreshMembership = useCallback(async () => {
@@ -1157,10 +1161,11 @@ function App() {
   }, [undoEntry]);
 
   // Track the back-stack handler for the entry modal so we can pop it
-  const openAdd  = () => { lightHaptic(); setEditing(null); setLayer('entryModal', ()=>setEntryCloseSignal(s=>s+1)); setEntryOpen(true); };
-  const openEdit = (e) => { setEditing(e);   setLayer('entryModal', ()=>setEntryCloseSignal(s=>s+1)); setEntryOpen(true); };
+  const openAdd  = (seed=null) => { lightHaptic(); setEditing(null); setEntrySeed(seed); setLayer('entryModal', ()=>setEntryCloseSignal(s=>s+1)); setEntryOpen(true); };
+  const openEdit = (e) => { setEditing(e); setEntrySeed(null); setLayer('entryModal', ()=>setEntryCloseSignal(s=>s+1)); setEntryOpen(true); };
   const openCopy = useCallback((e) => {
-    setEditing({...e, id:undefined, date:toISO(new Date())});
+    setEditing(null);
+    setEntrySeed({...e, id:undefined, date:toISO(new Date())});
     setLayer('entryModal', ()=>setEntryCloseSignal(s=>s+1));
     setEntryOpen(true);
   }, []);
@@ -1226,7 +1231,7 @@ function App() {
             style={{display:tab===t?"":"none"}}>
             {mountedTabs.has(t)&&(
               <>
-                {t==="home"  && <HomeView store={store} rates={rates} base={base} entries={monthEntries} onEdit={openEdit} onDelete={removeEntry} onCopy={openCopy} monthTotals={monthTotals} viewMonth={viewMonth}/>}
+                {t==="home"  && <HomeView store={store} rates={rates} base={base} entries={monthEntries} allEntries={store.entries} onQuickAdd={openAdd} onEdit={openEdit} onDelete={removeEntry} onCopy={openCopy} monthTotals={monthTotals} viewMonth={viewMonth}/>}
                 {t==="cal"   && <CalendarView store={store} rates={rates} base={base} viewMonth={viewMonth} entries={monthEntries} onEdit={openEdit}/>}
                 {t==="chart" && (subscription.isPremium
                   ? <ChartView store={store} rates={rates} base={base} entries={monthEntries} allEntries={store.entries} viewMonth={viewMonth} onEdit={openEdit}/>
@@ -1239,7 +1244,7 @@ function App() {
         ))}
       </main>
 
-      <button onClick={openAdd} className="fixed right-5 bottom-24 w-14 h-14 rounded-full grid place-items-center active:scale-90 transition-transform duration-100" style={{background:"linear-gradient(135deg,var(--brand-from),var(--brand-to))",color:"white",boxShadow:"0 6px 24px var(--brand-glow)"}} aria-label="新增記帳">
+      <button onClick={()=>openAdd()} className="fixed right-5 bottom-24 w-14 h-14 rounded-full grid place-items-center active:scale-90 transition-transform duration-100" style={{background:"linear-gradient(135deg,var(--brand-from),var(--brand-to))",color:"white",boxShadow:"0 6px 24px var(--brand-glow)"}} aria-label="新增記帳">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" width="28" height="28"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
       </button>
 
@@ -1256,6 +1261,7 @@ function App() {
       {entryOpen && (
         <EntryModal
           entry={editing}
+          seed={entrySeed}
           store={store}
           base={base}
           rates={rates}
@@ -1397,7 +1403,7 @@ function MiniDonut({topP,topCatMap,total,base,nd}) {
   );
 }
 
-function HomeView({store, rates, base, entries, onEdit, onDelete, onCopy, monthTotals, viewMonth}) {
+function HomeView({store, rates, base, entries, allEntries, onQuickAdd, onEdit, onDelete, onCopy, monthTotals, viewMonth}) {
   const nd = store.settings?.noDecimals||false;
 
   // 今日：每日午夜自動更新
@@ -1485,6 +1491,18 @@ function HomeView({store, rates, base, entries, onEdit, onDelete, onCopy, monthT
   const hasMore=filteredGroups.length>visibleCount;
 
   const [ym1,ym2] = viewMonth.split("-");
+  const quickTemplates = useMemo(
+    ()=>buildQuickTemplates(allEntries, store.categories.expense, base),
+    [allEntries, store.categories.expense, base],
+  );
+  const weeklyInsight = useMemo(
+    ()=>getWeeklyInsight(allEntries, {
+      today: now,
+      weekStart: weekStartSetting,
+      toBase: entry=>eBase(entry, rates, base),
+    }),
+    [allEntries, rates, base, todayISO, weekStartSetting],
+  );
 
   const homeLayout = store.layout?.home || DEFAULT_LAYOUT.home;
   const renderHomeSection = (id) => {
@@ -1654,6 +1672,37 @@ function HomeView({store, rates, base, entries, onEdit, onDelete, onCopy, monthT
 
   return (
     <div className="px-3 pt-3 space-y-3">
+      <section className="quick-entry-card">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="quick-entry-kicker">最快 3 秒完成</div>
+            <div className="text-lg font-bold mt-0.5">記低先，之後先整理</div>
+          </div>
+          <button onClick={()=>onQuickAdd()} className="quick-entry-button">＋ 快速記帳</button>
+        </div>
+        <div className="quick-template-grid">
+          {quickTemplates.map((template,index)=>{
+            const category=store.categories.expense.find(item=>item.id===template.category) || {};
+            const method=PAYMENT_METHODS.find(item=>item.id===template.paymentMethod);
+            return (
+              <button key={`${template.category}-${index}`} onClick={()=>onQuickAdd(template)} className="quick-template">
+                <span className="quick-template-icon">{category.icon||"💸"}</span>
+                <span className="min-w-0 text-left">
+                  <span className="quick-template-name">{template.memo||category.name||"快速記帳"}</span>
+                  <span className="quick-template-meta">{fmt(template.amount,template.currency||base,nd)}{method?` · ${method.label}`:""}</span>
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </section>
+      <section className={`weekly-insight weekly-insight-${weeklyInsight.tone}`}>
+        <span className="weekly-insight-icon">{weeklyInsight.tone==="positive"?"↘":weeklyInsight.tone==="warning"?"↗":"✦"}</span>
+        <span>
+          <span className="block text-xs font-bold">每週小結</span>
+          <span className="block text-sm mt-0.5">{weeklyInsight.text}</span>
+        </span>
+      </section>
       {homeLayout.filter(item=>item.visible).map(item=>renderHomeSection(item.id))}
     </div>
   );
@@ -2262,7 +2311,7 @@ function OtherView({store, setStore}) {
     }
   };
   const aboutRows = [
-    ["版本","v2.2.260726",false],
+    ["版本","v2.4.260726",false],
     ["製作者","AKiRa",true],
     ["技術","React · Capacitor",false],
     ["支援幣種","MOP · HKD · CNY · JPY · TWD",false],
@@ -3269,6 +3318,13 @@ function DataSettings({store, setStore, fbDrive, isPremium, onUpgrade}) {
     />
     <div className="space-y-3">
       {msg&&<div className={`text-sm px-4 py-3 rounded-2xl text-center font-medium ${msg.err?"bg-red-50 text-red-600":"bg-green-50 text-green-700"}`}>{msg.text}</div>}
+      <div className="privacy-status-card">
+        <span className="privacy-status-icon">🛡️</span>
+        <span>
+          <span className="block text-sm font-bold">你嘅帳目預設只留喺裝置</span>
+          <span className="block text-xs mt-1 text-gray-400 leading-relaxed">唔使用第三方廣告追蹤；只有你主動登入並啟用 Premium 同步，資料先會上傳到 Firebase。</span>
+        </span>
+      </div>
       {isPremium ? (
         <FirebaseSyncPanel fbDrive={fbDrive} dataModified={store._lastModified} />
       ) : (
@@ -3281,18 +3337,11 @@ function DataSettings({store, setStore, fbDrive, isPremium, onUpgrade}) {
       <div className="bg-white rounded-2xl shadow-sm p-4 space-y-3">
         <div className="text-sm font-semibold">資料備份</div>
         <button onClick={doExportCSV} className="w-full py-3 rounded-xl text-sm font-medium text-white" style={{background:"var(--brand)"}}>📤 匯出 CSV 備份</button>
-        {isPremium ? (
-          <>
-            <label className="block w-full py-3 rounded-xl text-sm font-medium text-center border-2 border-dashed border-gray-200 text-gray-500 cursor-pointer hover:border-[color:var(--brand)]">
-              📥 匯入 CSV 備份
-              <input type="file" accept=".csv,.txt" className="hidden" onChange={doImportCSV}/>
-            </label>
-          </>
-        ) : (
-          <button onClick={onUpgrade} className="w-full py-3 rounded-xl text-sm font-semibold bg-amber-50 text-amber-700">
-            ✨ Premium 解鎖 CSV 匯入
-          </button>
-        )}
+        <label className="block w-full py-3 rounded-xl text-sm font-medium text-center border-2 border-dashed border-gray-200 text-gray-500 cursor-pointer hover:border-[color:var(--brand)]">
+          📥 免費匯入 CSV 備份
+          <input type="file" accept=".csv,.txt" className="hidden" onChange={doImportCSV}/>
+        </label>
+        <div className="text-[11px] text-gray-400 leading-relaxed">匯入前會顯示筆數並由你確認；現有資料唔會被覆蓋。</div>
       </div>
       <div className="bg-white rounded-2xl shadow-sm p-4">
         <div className="text-sm font-semibold mb-3">統計</div>
@@ -3346,29 +3395,33 @@ function CalcPad({expr, onKey}) {
 }
 
 /* ===================== 記帳 Modal ===================== */
-function EntryModal({entry, store, base, rates, onSave, onDelete, onClose, closeSignal}) {
+function EntryModal({entry, seed, store, base, rates, onSave, onDelete, onClose, closeSignal}) {
   const [exiting, setExiting] = React.useState(false);
   const [delConfirm, setDelConfirm] = React.useState(false);
   const handleClose = React.useCallback(()=>{ setExiting(true); setTimeout(onClose,230); },[onClose]);
   useEffect(()=>{ if(closeSignal>0) handleClose(); },[closeSignal]);
   const isEdit = !!entry;
+  const initial = entry || seed || {};
   const today = toISO(new Date());
-  const [type, setType] = useState(entry?.type || "expense");
-  const [category, setCategory] = useState(entry?.category || "");
-  const [amount, setAmount] = useState(entry?.amount ? String(entry.amount) : "");
-  const [currency, setCurrency] = useState(entry?.currency || base);
-  const [date, setDate] = useState(entry?.date || today);
-  const [memo, setMemo] = useState(entry?.memo || "");
-  const [calcOpen, setCalcOpen] = useState(!entry); // auto-open for new entries
-  const [calcExpr, setCalcExpr] = useState(entry?.amount ? String(entry.amount) : "");
+  const [type, setType] = useState(initial.type || "expense");
+  const [category, setCategory] = useState(initial.category || "");
+  const [amount, setAmount] = useState(initial.amount ? String(initial.amount) : "");
+  const [currency, setCurrency] = useState(initial.currency || base);
+  const [date, setDate] = useState(initial.date || today);
+  const [memo, setMemo] = useState(initial.memo || "");
+  const [paymentMethod, setPaymentMethod] = useState(initial.paymentMethod || "");
+  const [calcOpen, setCalcOpen] = useState(!initial.amount);
+  const [calcExpr, setCalcExpr] = useState(initial.amount ? String(initial.amount) : "");
+  const [showDetails, setShowDetails] = useState(isEdit);
+  const [showAllCategories, setShowAllCategories] = useState(isEdit);
   // 初始展開：新增時預設第一個主分類；編輯時還原子分類所屬的父分類
   const [catTab, setCatTab] = useState(()=>{
-    if (!entry?.category) {
+    if (!initial.category) {
       const fp = store.categories.expense.find(c=>!c.parentId);
       return fp?.id || null;
     }
     const allCats=[...(store.categories.expense||[]),...(store.categories.income||[])];
-    const ec=allCats.find(c=>c.id===entry.category);
+    const ec=allCats.find(c=>c.id===initial.category);
     return ec?.parentId||null;
   });
 
@@ -3408,6 +3461,7 @@ function EntryModal({entry, store, base, rates, onSave, onDelete, onClose, close
 
   const cats = store.categories[type];
   const parentCats = cats.filter(c=>!c.parentId);
+  const quickCats = cats.filter(c=>c.parentId).slice(0, type==="expense"?8:6);
   const selectedCat = cats.find(c=>c.id===category);
   const parentOfSelected = selectedCat?.parentId ? cats.find(c=>c.id===selectedCat.parentId) : null;
 
@@ -3417,7 +3471,7 @@ function EntryModal({entry, store, base, rates, onSave, onDelete, onClose, close
     let v = parseFloat(amount);
     if (!v || v<=0 || !category) return;
     if (store.settings?.noDecimals) v = Math.trunc(v);
-    const entryData = { id: entry?.id || Date.now()+"_"+Math.random().toString(36).slice(2), type, category, amount:v, currency, date, memo };
+    const entryData = { id: entry?.id || Date.now()+"_"+Math.random().toString(36).slice(2), type, category, amount:v, currency, date, memo, paymentMethod };
     if (currency !== base) entryData.baseAmount = Math.round(toBase(v, currency, rates, base) * 10000) / 10000;
     else delete entryData.baseAmount;
     onSave(entryData);
@@ -3434,7 +3488,7 @@ function EntryModal({entry, store, base, rates, onSave, onDelete, onClose, close
       {/* Header */}
       <div className="px-4 py-4 flex items-center justify-between border-b border-gray-100 flex-shrink-0">
         <button onClick={handleClose} className="text-sm text-gray-400">取消</button>
-        <div className="text-base font-semibold">{isEdit?"編輯記帳":"新增記帳"}</div>
+        <div className="text-base font-semibold">{isEdit?"編輯記帳":seed?"快速記帳":"新增記帳"}</div>
         <button onClick={save} className="text-sm font-semibold" style={{color:"var(--brand)"}}>確定</button>
       </div>
 
@@ -3467,31 +3521,40 @@ function EntryModal({entry, store, base, rates, onSave, onDelete, onClose, close
           )}
         </div>
 
-        {/* 日期 */}
+        {/* 付款方式 */}
         <div>
-          <div className="text-sm text-gray-500 mb-2">日期</div>
-          <div className="flex gap-2 mb-2">
-            {[["今天",0],["昨天",1],["前天",2]].map(([l,d])=>{
-              const t=new Date(); t.setDate(t.getDate()-d); const v=toISO(t);
-              return <button key={l} onClick={()=>setDate(v)}
-                className={`px-3 py-1 rounded-lg text-xs font-medium border transition-all ${date===v?"border-[color:var(--brand)] bg-[color:var(--brand-soft)] text-[color:var(--brand)]":"border-gray-200 text-gray-500"}`}>{l}</button>;
-            })}
+          <div className="text-sm text-gray-500 mb-2">付款方式 <span className="text-gray-300">（選填）</span></div>
+          <div className="payment-methods">
+            {PAYMENT_METHODS.map(method=>(
+              <button key={method.id} onClick={()=>setPaymentMethod(value=>value===method.id?"":method.id)}
+                className={`payment-method ${paymentMethod===method.id?"payment-method-active":""}`}>
+                <span>{method.icon}</span><span>{method.label}</span>
+              </button>
+            ))}
           </div>
-          <input type="date" value={date} onChange={e=>setDate(e.target.value)}
-            className="w-full min-w-0 max-w-full border border-gray-200 rounded-xl px-4 py-3 text-sm"
-            style={{boxSizing:"border-box"}}/>
         </div>
 
-        {/* 備注 */}
+        {/* 常用分類 */}
         <div>
-          <div className="text-sm text-gray-500 mb-2">備注</div>
-          <input ref={memoRef} type="text" value={memo} onChange={e=>setMemo(e.target.value)} placeholder="選填"
-            className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm"/>
+          <div className="flex items-center justify-between mb-2">
+            <div className="text-sm text-gray-500">分類</div>
+            <button onClick={()=>setShowAllCategories(value=>!value)} className="text-xs font-semibold" style={{color:"var(--brand)"}}>
+              {showAllCategories?"收起":"全部分類"}
+            </button>
+          </div>
+          <div className="quick-category-grid">
+            {quickCats.map(c=>(
+              <button key={c.id} onClick={()=>setCategory(c.id)}
+                className={`quick-category ${category===c.id?"quick-category-active":""}`}
+                style={category===c.id?{"--category-color":c.color}:undefined}>
+                <span>{c.icon}</span><span>{c.name}</span>
+              </button>
+            ))}
+          </div>
         </div>
 
-        {/* 分類選擇 */}
-        <div>
-          <div className="text-sm text-gray-500 mb-2">分類</div>
+        {/* 完整分類選擇 */}
+        {showAllCategories&&<div>
           <div className="flex rounded-2xl border border-gray-200 overflow-hidden" style={{minHeight:180}}>
             {/* 左：主分類清單 */}
             <div className="w-2/5 border-r border-gray-100 bg-gray-50 overflow-y-auto no-scrollbar">
@@ -3541,7 +3604,33 @@ function EntryModal({entry, store, base, rates, onSave, onDelete, onClose, close
               })()}
             </div>
           </div>
-        </div>
+        </div>}
+
+        <button onClick={()=>setShowDetails(value=>!value)} className="more-details-button">
+          <span>日期及備注</span><span>{showDetails?"⌃":"⌄"}</span>
+        </button>
+        {showDetails&&(
+          <div className="space-y-4 detail-panel">
+            <div>
+              <div className="text-sm text-gray-500 mb-2">日期</div>
+              <div className="flex gap-2 mb-2">
+                {[["今天",0],["昨天",1],["前天",2]].map(([l,d])=>{
+                  const t=new Date(); t.setDate(t.getDate()-d); const v=toISO(t);
+                  return <button key={l} onClick={()=>setDate(v)}
+                    className={`px-3 py-1 rounded-lg text-xs font-medium border transition-all ${date===v?"border-[color:var(--brand)] bg-[color:var(--brand-soft)] text-[color:var(--brand)]":"border-gray-200 text-gray-500"}`}>{l}</button>;
+                })}
+              </div>
+              <input type="date" value={date} onChange={e=>setDate(e.target.value)}
+                className="w-full min-w-0 max-w-full border border-gray-200 rounded-xl px-4 py-3 text-sm"
+                style={{boxSizing:"border-box"}}/>
+            </div>
+            <div>
+              <div className="text-sm text-gray-500 mb-2">備注</div>
+              <input ref={memoRef} type="text" value={memo} onChange={e=>setMemo(e.target.value)} placeholder="選填"
+                className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm"/>
+            </div>
+          </div>
+        )}
 
         {/* 刪除 */}
         {isEdit&&(
@@ -3558,7 +3647,9 @@ function EntryModal({entry, store, base, rates, onSave, onDelete, onClose, close
 }
 
 /* ===================== 啟動 ===================== */
-createRoot(document.getElementById("root")).render(<App/>);
+const appRoot = globalThis.__qysReactRoot || createRoot(document.getElementById("root"));
+globalThis.__qysReactRoot = appRoot;
+appRoot.render(<App/>);
 
 if (!isNative() && "serviceWorker" in navigator) {
   let refreshing = false;
