@@ -6,12 +6,15 @@ export const PAYMENT_METHODS = [
   { id: "credit_card", label: "信用卡", icon: "💳" },
 ];
 
-export const DEFAULT_ENTRY_SECTION_ORDER = ["payment", "category", "details"];
+export const DEFAULT_ENTRY_SECTION_ORDER = ["payment", "category", "date", "note"];
 
 export function normalizeEntrySectionOrder(order) {
-  const valid = Array.isArray(order)
-    ? order.filter((id, index) => DEFAULT_ENTRY_SECTION_ORDER.includes(id) && order.indexOf(id) === index)
+  const expanded = Array.isArray(order)
+    ? order.flatMap(id => id === "details" ? ["date", "note"] : [id])
     : [];
+  const valid = expanded.filter(
+    (id, index) => DEFAULT_ENTRY_SECTION_ORDER.includes(id) && expanded.indexOf(id) === index,
+  );
   return [...valid, ...DEFAULT_ENTRY_SECTION_ORDER.filter(id => !valid.includes(id))];
 }
 

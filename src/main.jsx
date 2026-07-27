@@ -2434,7 +2434,7 @@ function OtherView({store, setStore}) {
     }
   };
   const aboutRows = [
-    ["版本","v2.4.2",false],
+    ["版本","v2.4.3",false],
     ["製作者","AKiRa",true],
     ["技術","React · Capacitor",false],
     ["支援幣種","MOP · HKD · CNY · JPY · TWD",false],
@@ -3608,7 +3608,7 @@ function EntryModal({entry, seed, store, base, rates, onSave, onDelete, onSectio
   const paymentMethods = store.paymentMethods || PAYMENT_METHODS;
   const [calcOpen, setCalcOpen] = useState(!initial.amount);
   const [calcExpr, setCalcExpr] = useState(initial.amount ? String(initial.amount) : "");
-  const [showDetails, setShowDetails] = useState(isEdit);
+  const [openEntryDetails, setOpenEntryDetails] = useState({date:isEdit,note:isEdit});
   const [showAllCategories, setShowAllCategories] = useState(isEdit);
   // 初始展開：新增時預設第一個主分類；編輯時還原子分類所屬的父分類
   const [catTab, setCatTab] = useState(()=>{
@@ -3765,34 +3765,43 @@ function EntryModal({entry, seed, store, base, rates, onSave, onDelete, onSectio
       </>
     );
 
+    if (section.id === "date") return (
+      <>
+        <div className="flex items-center gap-2">
+          <button onClick={()=>setOpenEntryDetails(value=>({...value,date:!value.date}))} className="more-details-button entry-details-button">
+            <span>日期</span><span>{openEntryDetails.date?"⌃":"⌄"}</span>
+          </button>
+          <EntrySectionHandle label="日期" drag={drag}/>
+        </div>
+        {openEntryDetails.date&&(
+          <div className="detail-panel mt-3">
+            <div className="flex gap-2 mb-2">
+              {[["今天",0],["昨天",1],["前天",2]].map(([label,days])=>{
+                const target=new Date(); target.setDate(target.getDate()-days); const value=toISO(target);
+                return <button key={label} onClick={()=>setDate(value)}
+                  className={`px-3 py-1 rounded-lg text-xs font-medium border transition-all ${date===value?"border-[color:var(--brand)] bg-[color:var(--brand-soft)] text-[color:var(--brand)]":"border-gray-200 text-gray-500"}`}>{label}</button>;
+              })}
+            </div>
+            <input type="date" value={date} onChange={event=>setDate(event.target.value)}
+              className="w-full min-w-0 max-w-full border border-gray-200 rounded-xl px-4 py-3 text-sm"
+              style={{boxSizing:"border-box"}}/>
+          </div>
+        )}
+      </>
+    );
+
     return (
       <>
         <div className="flex items-center gap-2">
-          <button onClick={()=>setShowDetails(value=>!value)} className="more-details-button entry-details-button">
-            <span>日期及備注</span><span>{showDetails?"⌃":"⌄"}</span>
+          <button onClick={()=>setOpenEntryDetails(value=>({...value,note:!value.note}))} className="more-details-button entry-details-button">
+            <span>備注</span><span>{openEntryDetails.note?"⌃":"⌄"}</span>
           </button>
-          <EntrySectionHandle label="日期及備注" drag={drag}/>
+          <EntrySectionHandle label="備注" drag={drag}/>
         </div>
-        {showDetails&&(
-          <div className="space-y-4 detail-panel mt-3">
-            <div>
-              <div className="text-sm text-gray-500 mb-2">日期</div>
-              <div className="flex gap-2 mb-2">
-                {[["今天",0],["昨天",1],["前天",2]].map(([label,days])=>{
-                  const target=new Date(); target.setDate(target.getDate()-days); const value=toISO(target);
-                  return <button key={label} onClick={()=>setDate(value)}
-                    className={`px-3 py-1 rounded-lg text-xs font-medium border transition-all ${date===value?"border-[color:var(--brand)] bg-[color:var(--brand-soft)] text-[color:var(--brand)]":"border-gray-200 text-gray-500"}`}>{label}</button>;
-                })}
-              </div>
-              <input type="date" value={date} onChange={event=>setDate(event.target.value)}
-                className="w-full min-w-0 max-w-full border border-gray-200 rounded-xl px-4 py-3 text-sm"
-                style={{boxSizing:"border-box"}}/>
-            </div>
-            <div>
-              <div className="text-sm text-gray-500 mb-2">備注</div>
-              <input ref={memoRef} type="text" value={memo} onChange={event=>setMemo(event.target.value)} placeholder="選填"
-                className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm"/>
-            </div>
+        {openEntryDetails.note&&(
+          <div className="detail-panel mt-3">
+            <input ref={memoRef} type="text" value={memo} onChange={event=>setMemo(event.target.value)} placeholder="選填"
+              className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm"/>
           </div>
         )}
       </>

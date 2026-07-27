@@ -47,13 +47,13 @@ test("空資料仍可產生安全提示", () => {
 });
 
 test("舊帳本會補回完整記帳區塊順序", () => {
-  assert.deepEqual(normalizeEntrySectionOrder(["details"]), ["details", "payment", "category"]);
-  assert.deepEqual(normalizeEntrySectionOrder(["payment", "unknown", "payment"]), ["payment", "category", "details"]);
+  assert.deepEqual(normalizeEntrySectionOrder(["details"]), ["date", "note", "payment", "category"]);
+  assert.deepEqual(normalizeEntrySectionOrder(["payment", "unknown", "payment"]), ["payment", "category", "date", "note"]);
 });
 
 test("記帳區塊可按拖放結果重新排序", () => {
   assert.deepEqual(
-    reorderEntrySections(["payment", "category", "details"], 2, 0),
-    ["details", "payment", "category"],
+    reorderEntrySections(["payment", "category", "date", "note"], 3, 0),
+    ["note", "payment", "category", "date"],
   );
 });
