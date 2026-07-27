@@ -1,6 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildQuickTemplates, getWeeklyInsight } from "./ledgerExperience.js";
+import {
+  buildQuickTemplates,
+  getWeeklyInsight,
+  normalizeEntrySectionOrder,
+  reorderEntrySections,
+} from "./ledgerExperience.js";
 
 const categories = [{ id: "breakfast" }, { id: "transit" }, { id: "drink" }];
 
@@ -39,4 +44,16 @@ test("空資料仍可產生安全提示", () => {
   const insight = getWeeklyInsight([], { today: new Date(2026, 6, 22) });
   assert.equal(insight.tone, "neutral");
   assert.match(insight.text, /第一筆/);
+});
+
+test("舊帳本會補回完整記帳區塊順序", () => {
+  assert.deepEqual(normalizeEntrySectionOrder(["details"]), ["details", "payment", "category"]);
+  assert.deepEqual(normalizeEntrySectionOrder(["payment", "unknown", "payment"]), ["payment", "category", "details"]);
+});
+
+test("記帳區塊可按拖放結果重新排序", () => {
+  assert.deepEqual(
+    reorderEntrySections(["payment", "category", "details"], 2, 0),
+    ["details", "payment", "category"],
+  );
 });

@@ -13,7 +13,14 @@ import {
 } from "./cloudAccount";
 import { isNative, lightHaptic, prepareNativeShell, setDailyReminder } from "./native";
 import { useSubscription } from "./subscription";
-import { buildQuickTemplates, getWeeklyInsight, PAYMENT_METHODS } from "./ledgerExperience";
+import {
+  buildQuickTemplates,
+  DEFAULT_ENTRY_SECTION_ORDER,
+  getWeeklyInsight,
+  normalizeEntrySectionOrder,
+  PAYMENT_METHODS,
+  reorderEntrySections,
+} from "./ledgerExperience";
 import "./styles.css";
 
 /* ===================== 常數 ===================== */
@@ -497,7 +504,7 @@ const defaultStore = () => ({
   paymentMethods: PAYMENT_METHODS.map(method => ({...method})),
   budgets: {},
   totalBudget: 0,
-  settings: { baseCurrency:"MOP", rates: DEFAULT_RATES },
+  settings: { baseCurrency:"MOP", rates: DEFAULT_RATES, entrySectionOrder:[...DEFAULT_ENTRY_SECTION_ORDER] },
 });
 // Ensure all required fields exist (used after load or cloud import)
 const DEFAULT_LAYOUT = {
@@ -525,6 +532,7 @@ const normalizeStore = (s) => {
     s.paymentMethods = PAYMENT_METHODS.map(method => ({...method}));
   }
   if (!s.settings) s.settings = defaultStore().settings;
+  s.settings.entrySectionOrder = normalizeEntrySectionOrder(s.settings.entrySectionOrder);
   if (s.settings.noDecimals == null) s.settings.noDecimals = false;
   if (s.settings.weekStart == null) s.settings.weekStart = "mon";
   if (!s.layout) {
@@ -771,6 +779,110 @@ function SortableList({ items, renderItem, onReorder, itemHeight = 68 }) {
         </div>
       ))}
     </div>
+  );
+}
+
+function ReorderableSections({items, onReorder, renderItem}) {
+  const containerRef = useRef(null);
+  const dragIdxRef = useRef(null);
+  const overIdxRef = useRef(null);
+  const [dragIdx, setDragIdx] = useState(null);
+  const [overIdx, setOverIdx] = useState(null);
+
+  const markDragStart = index => {
+    dragIdxRef.current = index;
+    overIdxRef.current = index;
+    setDragIdx(index);
+    setOverIdx(index);
+  };
+
+  const startDrag = (event, index) => {
+    event.stopPropagation();
+    if (event.pointerType === "mouse") {
+      markDragStart(index);
+      return;
+    }
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    markDragStart(index);
+  };
+
+  const startNativeDrag = (event, index) => {
+    event.stopPropagation();
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", items[index].id);
+    markDragStart(index);
+  };
+
+  const moveDrag = event => {
+    if (dragIdxRef.current === null) return;
+    event.preventDefault();
+    const sections = [...(containerRef.current?.querySelectorAll("[data-entry-section]") || [])];
+    let next = Math.max(0, sections.length - 1);
+    for (let index=0; index<sections.length; index++) {
+      const rect = sections[index].getBoundingClientRect();
+      if (event.clientY < rect.top + rect.height / 2) {
+        next = index;
+        break;
+      }
+    }
+    overIdxRef.current = next;
+    setOverIdx(next);
+  };
+
+  const finishDrag = () => {
+    const from = dragIdxRef.current;
+    const to = overIdxRef.current;
+    if (from !== null && to !== null && from !== to) onReorder(from, to);
+    dragIdxRef.current = null;
+    overIdxRef.current = null;
+    setDragIdx(null);
+    setOverIdx(null);
+  };
+
+  const moveByKeyboard = (event, index) => {
+    if (!["ArrowUp","ArrowDown"].includes(event.key)) return;
+    event.preventDefault();
+    const to = event.key === "ArrowUp" ? Math.max(0,index-1) : Math.min(items.length-1,index+1);
+    if (to !== index) onReorder(index,to);
+  };
+
+  return (
+    <div ref={containerRef} className="entry-section-list">
+      {items.map((item,index)=>(
+        <div key={item.id} data-entry-section={item.id}
+          onDragOver={event=>{event.preventDefault();overIdxRef.current=index;setOverIdx(index);}}
+          onDrop={event=>{event.preventDefault();finishDrag();}}
+          className={`entry-section-card ${dragIdx===index?"entry-section-dragging":""} ${dragIdx!==null&&overIdx===index?"entry-section-target":""}`}>
+          {renderItem(item,{
+            handlePointerDown:event=>startDrag(event,index),
+            handlePointerMove:moveDrag,
+            handlePointerUp:finishDrag,
+            handlePointerCancel:finishDrag,
+            handleDragStart:event=>startNativeDrag(event,index),
+            handleDragEnd:finishDrag,
+            handleKeyDown:event=>moveByKeyboard(event,index),
+            isDragging:dragIdx===index,
+          })}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function EntrySectionHandle({label, drag}) {
+  return (
+    <button type="button" aria-label={`拖拉${label}`} title={`拖拉${label}以更改位置`}
+      draggable="true"
+      className="entry-section-handle"
+      onClick={event=>event.stopPropagation()}
+      onPointerDown={drag.handlePointerDown}
+      onPointerMove={drag.handlePointerMove}
+      onPointerUp={drag.handlePointerUp}
+      onPointerCancel={drag.handlePointerCancel}
+      onDragStart={drag.handleDragStart}
+      onDragEnd={drag.handleDragEnd}
+      onKeyDown={drag.handleKeyDown}>⠿</button>
   );
 }
 
@@ -1273,6 +1385,11 @@ function App() {
           rates={rates}
           onSave={e=>{upsertEntry(e);handleEntryClose();}}
           onDelete={id=>{removeEntry(id);handleEntryClose();}}
+          onSectionOrderChange={entrySectionOrder=>setStore(s=>({
+            ...s,
+            settings:{...s.settings,entrySectionOrder},
+            _lastModified:new Date().toISOString(),
+          }))}
           onClose={handleEntryClose}
           closeSignal={entryCloseSignal}
         />
@@ -2317,7 +2434,7 @@ function OtherView({store, setStore}) {
     }
   };
   const aboutRows = [
-    ["版本","v2.4.1",false],
+    ["版本","v2.4.2",false],
     ["製作者","AKiRa",true],
     ["技術","React · Capacitor",false],
     ["支援幣種","MOP · HKD · CNY · JPY · TWD",false],
@@ -3473,7 +3590,7 @@ function CalcPad({expr, onKey}) {
 }
 
 /* ===================== 記帳 Modal ===================== */
-function EntryModal({entry, seed, store, base, rates, onSave, onDelete, onClose, closeSignal}) {
+function EntryModal({entry, seed, store, base, rates, onSave, onDelete, onSectionOrderChange, onClose, closeSignal}) {
   const [exiting, setExiting] = React.useState(false);
   const [delConfirm, setDelConfirm] = React.useState(false);
   const handleClose = React.useCallback(()=>{ setExiting(true); setTimeout(onClose,230); },[onClose]);
@@ -3556,6 +3673,132 @@ function EntryModal({entry, seed, store, base, rates, onSave, onDelete, onClose,
     onSave(entryData);
   };
 
+  const entrySectionOrder = normalizeEntrySectionOrder(store.settings?.entrySectionOrder);
+  const moveEntrySection = (from, to) => {
+    lightHaptic();
+    onSectionOrderChange(reorderEntrySections(entrySectionOrder, from, to));
+  };
+
+  const renderEntrySection = (section, drag) => {
+    if (section.id === "payment") return (
+      <>
+        <div className="entry-section-heading">
+          <div className="text-sm text-gray-500">付款方式 <span className="text-gray-300">（選填）</span></div>
+          <EntrySectionHandle label="付款方式" drag={drag}/>
+        </div>
+        <div className="payment-methods">
+          {paymentMethods.map(method=>(
+            <button key={method.id} aria-pressed={paymentMethod===method.id}
+              onClick={event=>{event.stopPropagation();setPaymentMethod(value=>value===method.id?"":method.id);}}
+              className={`payment-method ${paymentMethod===method.id?"payment-method-active":""}`}>
+              <span>{method.icon}</span><span>{method.label}</span>{paymentMethod===method.id&&<span aria-hidden="true">✓</span>}
+            </button>
+          ))}
+        </div>
+      </>
+    );
+
+    if (section.id === "category") return (
+      <>
+        <div className="entry-section-heading">
+          <div className="text-sm text-gray-500">分類</div>
+          <div className="flex items-center gap-2">
+            <button onClick={()=>setShowAllCategories(value=>!value)} className="text-xs font-semibold" style={{color:"var(--brand)"}}>
+              {showAllCategories?"收起":"全部分類"}
+            </button>
+            <EntrySectionHandle label="分類" drag={drag}/>
+          </div>
+        </div>
+        <div className="quick-category-grid">
+          {quickCats.map(c=>(
+            <button key={c.id} onClick={()=>setCategory(c.id)}
+              className={`quick-category ${category===c.id?"quick-category-active":""}`}
+              style={category===c.id?{"--category-color":c.color}:undefined}>
+              <span>{c.icon}</span><span>{c.name}</span>
+            </button>
+          ))}
+        </div>
+        {showAllCategories&&(
+          <div className="mt-3 flex rounded-2xl border border-gray-200 overflow-hidden" style={{minHeight:180}}>
+            <div className="w-2/5 border-r border-gray-100 bg-gray-50 overflow-y-auto no-scrollbar">
+              {parentCats.map(parent=>{
+                const children=cats.filter(c=>c.parentId===parent.id);
+                const highlight=catTab===parent.id;
+                return (
+                  <button key={parent.id} onClick={event=>{
+                    event.stopPropagation();
+                    setCatTab(parent.id);
+                    if(children.length===0) setCategory(parent.id);
+                  }}
+                    className={`w-full flex flex-col items-center gap-1 py-3 px-1 text-center transition-colors relative ${highlight?"bg-white":"bg-transparent"}`}>
+                    {highlight && <div className="absolute left-0 top-2 bottom-2 w-0.5 rounded-r" style={{background:parent.color}}/>}
+                    <div className="w-9 h-9 rounded-xl grid place-items-center text-xl" style={{background:parent.color+"33"}}>{parent.icon}</div>
+                    <span className="text-[10px] leading-tight text-gray-600 font-medium w-full truncate px-1" style={{fontWeight:highlight?700:400}}>{parent.name}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="flex-1 overflow-y-auto no-scrollbar p-2">
+              {!catTab&&<div className="flex items-center justify-center h-full text-xs text-gray-300">選擇左側分類</div>}
+              {catTab&&(()=>{
+                const children=cats.filter(c=>c.parentId===catTab);
+                if(!children.length) return <div className="flex items-center justify-center h-full text-xs text-gray-300">無子分類</div>;
+                return (
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {children.map(c=>{
+                      const isSel=category===c.id;
+                      return (
+                        <button key={c.id} onClick={event=>{event.stopPropagation();setCategory(c.id);}}
+                          className={`flex flex-col items-center gap-1 py-2.5 px-1 rounded-xl transition-all text-center ${isSel?"":"bg-gray-50"}`}
+                          style={isSel?{background:c.color+"33",outline:`2px solid ${c.color}`}:{outline:"none"}}>
+                          <span className="text-xl">{c.icon}</span>
+                          <span className="text-[10px] leading-tight text-gray-600 font-medium truncate w-full px-1" style={{fontWeight:isSel?700:400}}>{c.name}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
+            </div>
+          </div>
+        )}
+      </>
+    );
+
+    return (
+      <>
+        <div className="flex items-center gap-2">
+          <button onClick={()=>setShowDetails(value=>!value)} className="more-details-button entry-details-button">
+            <span>日期及備注</span><span>{showDetails?"⌃":"⌄"}</span>
+          </button>
+          <EntrySectionHandle label="日期及備注" drag={drag}/>
+        </div>
+        {showDetails&&(
+          <div className="space-y-4 detail-panel mt-3">
+            <div>
+              <div className="text-sm text-gray-500 mb-2">日期</div>
+              <div className="flex gap-2 mb-2">
+                {[["今天",0],["昨天",1],["前天",2]].map(([label,days])=>{
+                  const target=new Date(); target.setDate(target.getDate()-days); const value=toISO(target);
+                  return <button key={label} onClick={()=>setDate(value)}
+                    className={`px-3 py-1 rounded-lg text-xs font-medium border transition-all ${date===value?"border-[color:var(--brand)] bg-[color:var(--brand-soft)] text-[color:var(--brand)]":"border-gray-200 text-gray-500"}`}>{label}</button>;
+                })}
+              </div>
+              <input type="date" value={date} onChange={event=>setDate(event.target.value)}
+                className="w-full min-w-0 max-w-full border border-gray-200 rounded-xl px-4 py-3 text-sm"
+                style={{boxSizing:"border-box"}}/>
+            </div>
+            <div>
+              <div className="text-sm text-gray-500 mb-2">備注</div>
+              <input ref={memoRef} type="text" value={memo} onChange={event=>setMemo(event.target.value)} placeholder="選填"
+                className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm"/>
+            </div>
+          </div>
+        )}
+      </>
+    );
+  };
+
   return (
     <>
     <ConfirmDialog open={delConfirm} title="刪除記錄" message="確定刪除此筆記帳？此操作無法還原。"
@@ -3600,117 +3843,11 @@ function EntryModal({entry, seed, store, base, rates, onSave, onDelete, onClose,
           )}
         </div>
 
-        {/* 付款方式 */}
-        <div>
-          <div className="text-sm text-gray-500 mb-2">付款方式 <span className="text-gray-300">（選填）</span></div>
-          <div className="payment-methods">
-            {paymentMethods.map(method=>(
-              <button key={method.id} aria-pressed={paymentMethod===method.id}
-                onClick={event=>{event.stopPropagation();setPaymentMethod(value=>value===method.id?"":method.id);}}
-                className={`payment-method ${paymentMethod===method.id?"payment-method-active":""}`}>
-                <span>{method.icon}</span><span>{method.label}</span>{paymentMethod===method.id&&<span aria-hidden="true">✓</span>}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* 常用分類 */}
-        <div>
-          <div className="flex items-center justify-between mb-2">
-            <div className="text-sm text-gray-500">分類</div>
-            <button onClick={()=>setShowAllCategories(value=>!value)} className="text-xs font-semibold" style={{color:"var(--brand)"}}>
-              {showAllCategories?"收起":"全部分類"}
-            </button>
-          </div>
-          <div className="quick-category-grid">
-            {quickCats.map(c=>(
-              <button key={c.id} onClick={()=>setCategory(c.id)}
-                className={`quick-category ${category===c.id?"quick-category-active":""}`}
-                style={category===c.id?{"--category-color":c.color}:undefined}>
-                <span>{c.icon}</span><span>{c.name}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* 完整分類選擇 */}
-        {showAllCategories&&<div>
-          <div className="flex rounded-2xl border border-gray-200 overflow-hidden" style={{minHeight:180}}>
-            {/* 左：主分類清單 */}
-            <div className="w-2/5 border-r border-gray-100 bg-gray-50 overflow-y-auto no-scrollbar">
-              {parentCats.map(parent=>{
-                const children=cats.filter(c=>c.parentId===parent.id);
-                const highlight=catTab===parent.id;
-                return (
-                  <button key={parent.id} onClick={e=>{
-                    e.stopPropagation();
-                    setCatTab(parent.id);
-                    if(children.length===0) setCategory(parent.id);
-                  }}
-                    className={`w-full flex flex-col items-center gap-1 py-3 px-1 text-center transition-colors relative ${highlight?"bg-white":"bg-transparent"}`}>
-                    {highlight && <div className="absolute left-0 top-2 bottom-2 w-0.5 rounded-r" style={{background:parent.color}}/>}
-                    <div className="w-9 h-9 rounded-xl grid place-items-center text-xl" style={{background:parent.color+"33"}}>{parent.icon}</div>
-                    <span className="text-[10px] leading-tight text-gray-600 font-medium w-full truncate px-1" style={{fontWeight:highlight?700:400}}>{parent.name}</span>
-                  </button>
-                );
-              })}
-            </div>
-            {/* 右：次分類 2列 grid */}
-            <div className="flex-1 overflow-y-auto no-scrollbar p-2">
-              {!catTab && (
-                <div className="flex items-center justify-center h-full text-xs text-gray-300">選擇左側分類</div>
-              )}
-              {catTab&&(()=>{
-                const children=cats.filter(c=>c.parentId===catTab);
-                const parentCat=cats.find(c=>c.id===catTab);
-                if(!children.length) return (
-                  <div className="flex items-center justify-center h-full text-xs text-gray-300">無子分類</div>
-                );
-                return (
-                  <div className="grid grid-cols-2 gap-1.5">
-                    {children.map(c=>{
-                      const isSel=category===c.id;
-                      return (
-                        <button key={c.id} onClick={e=>{ e.stopPropagation(); setCategory(c.id); }}
-                          className={`flex flex-col items-center gap-1 py-2.5 px-1 rounded-xl transition-all text-center ${isSel?"":"bg-gray-50"}`}
-                          style={isSel?{background:c.color+"33",outline:`2px solid ${c.color}`}:{outline:"none"}}>
-                          <span className="text-xl">{c.icon}</span>
-                          <span className="text-[10px] leading-tight text-gray-600 font-medium truncate w-full px-1" style={{fontWeight:isSel?700:400}}>{c.name}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                );
-              })()}
-            </div>
-          </div>
-        </div>}
-
-        <button onClick={()=>setShowDetails(value=>!value)} className="more-details-button">
-          <span>日期及備注</span><span>{showDetails?"⌃":"⌄"}</span>
-        </button>
-        {showDetails&&(
-          <div className="space-y-4 detail-panel">
-            <div>
-              <div className="text-sm text-gray-500 mb-2">日期</div>
-              <div className="flex gap-2 mb-2">
-                {[["今天",0],["昨天",1],["前天",2]].map(([l,d])=>{
-                  const t=new Date(); t.setDate(t.getDate()-d); const v=toISO(t);
-                  return <button key={l} onClick={()=>setDate(v)}
-                    className={`px-3 py-1 rounded-lg text-xs font-medium border transition-all ${date===v?"border-[color:var(--brand)] bg-[color:var(--brand-soft)] text-[color:var(--brand)]":"border-gray-200 text-gray-500"}`}>{l}</button>;
-                })}
-              </div>
-              <input type="date" value={date} onChange={e=>setDate(e.target.value)}
-                className="w-full min-w-0 max-w-full border border-gray-200 rounded-xl px-4 py-3 text-sm"
-                style={{boxSizing:"border-box"}}/>
-            </div>
-            <div>
-              <div className="text-sm text-gray-500 mb-2">備注</div>
-              <input ref={memoRef} type="text" value={memo} onChange={e=>setMemo(e.target.value)} placeholder="選填"
-                className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm"/>
-            </div>
-          </div>
-        )}
+        <ReorderableSections
+          items={entrySectionOrder.map(id=>({id}))}
+          onReorder={moveEntrySection}
+          renderItem={renderEntrySection}
+        />
 
         {/* 刪除 */}
         {isEdit&&(

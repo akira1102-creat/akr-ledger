@@ -119,6 +119,21 @@
   .weekly-insight-positive .weekly-insight-icon { color:#0f9f70; background:#c9f4e3; }
   .weekly-insight-warning { color:#9a5b16; background:#fff6df; }
   .weekly-insight-warning .weekly-insight-icon { color:#d97706; background:#ffe9b0; }
+  .entry-section-list { display:flex; flex-direction:column; gap:12px; }
+  .entry-section-card {
+    min-width:0; padding:11px; border:1px solid #edf0f4; border-radius:16px;
+    background:#fff; transition:border-color .16s ease, box-shadow .16s ease, opacity .16s ease;
+  }
+  .entry-section-heading { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:8px; }
+  .entry-section-handle {
+    display:grid; place-items:center; width:34px; height:34px; flex-shrink:0;
+    border:1px solid #e5e7eb; border-radius:11px; color:#94a3b8; background:#f8fafc;
+    font-size:20px; line-height:1; cursor:grab; touch-action:none; user-select:none;
+  }
+  .entry-section-handle:active { cursor:grabbing; color:var(--brand); background:var(--brand-soft); }
+  .entry-section-dragging { opacity:.72; border-color:var(--brand); box-shadow:0 8px 24px rgba(15,23,42,.14); }
+  .entry-section-target { border-color:var(--brand); box-shadow:0 0 0 2px var(--brand-soft); }
+  .entry-details-button { width:auto; flex:1; }
   .payment-methods { display:flex; gap:8px; overflow-x:auto; padding-bottom:3px; scrollbar-width:none; }
   .payment-methods::-webkit-scrollbar { display:none; }
   .payment-method {
@@ -153,6 +168,8 @@
   html.dark .weekly-insight-neutral { color:#bae6fd; background:#102b42; }
   html.dark .weekly-insight-positive { color:#a7f3d0; background:#10352d; }
   html.dark .weekly-insight-warning { color:#fde68a; background:#3c2c15; }
+  html.dark .entry-section-card { border-color:#374151; background:#1f2937; }
+  html.dark .entry-section-handle { border-color:#475569; color:#cbd5e1; background:#111827; }
   html.dark .payment-method, html.dark .quick-category, html.dark .more-details-button { background:#1f2937; border-color:#475569; color:#cbd5e1; }
   html.dark .payment-method-active { border-color:var(--brand); color:var(--brand); background:var(--brand-soft); box-shadow:0 0 0 1px var(--brand); }
   html.dark .quick-category-active { background:color-mix(in srgb, var(--category-color) 22%, #1f2937); color:#f8fafc; }

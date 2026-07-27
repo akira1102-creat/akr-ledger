@@ -6,6 +6,24 @@ export const PAYMENT_METHODS = [
   { id: "credit_card", label: "信用卡", icon: "💳" },
 ];
 
+export const DEFAULT_ENTRY_SECTION_ORDER = ["payment", "category", "details"];
+
+export function normalizeEntrySectionOrder(order) {
+  const valid = Array.isArray(order)
+    ? order.filter((id, index) => DEFAULT_ENTRY_SECTION_ORDER.includes(id) && order.indexOf(id) === index)
+    : [];
+  return [...valid, ...DEFAULT_ENTRY_SECTION_ORDER.filter(id => !valid.includes(id))];
+}
+
+export function reorderEntrySections(order, from, to) {
+  const normalized = normalizeEntrySectionOrder(order);
+  if (from === to || from < 0 || to < 0 || from >= normalized.length || to >= normalized.length) return normalized;
+  const next = [...normalized];
+  const [moved] = next.splice(from, 1);
+  next.splice(to, 0, moved);
+  return next;
+}
+
 const FALLBACK_TEMPLATES = [
   { type: "expense", category: "breakfast", amount: 32, paymentMethod: "octopus", memo: "早餐" },
   { type: "expense", category: "transit", amount: 6, paymentMethod: "octopus", memo: "交通" },
