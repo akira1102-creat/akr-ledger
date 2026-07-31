@@ -13,6 +13,7 @@ import {
 } from "./cloudAccount";
 import { isNative, lightHaptic, prepareNativeShell, setDailyReminder } from "./native";
 import { useSubscription } from "./subscription";
+import { waitForInitialAuthState, withTimeout } from "./firebaseAsync";
 import {
   buildQuickTemplates,
   DEFAULT_ENTRY_SECTION_ORDER,
@@ -43,6 +44,7 @@ const reportError = (scope, error, userMessage) => {
 const FB_STATE_KEY = "akr-fb-state";
 const FB_REDIRECT_KEY = "akr-fb-redirect-pending";
 const FB_CDN = "https://www.gstatic.com/firebasejs/10.12.2";
+const FIREBASE_TIMEOUT_MS = 12000;
 const FB_CONFIG = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
   authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
@@ -83,7 +85,7 @@ function useFirebaseSync(store, setStore, activeProfile, enabled=true) {
   const loadSaved = () => { try { return JSON.parse(localStorage.getItem(fbStateKey)||"null"); } catch { return null; } };
   const saved = loadSaved();
 
-  const [fbUser,     setFbUser]     = useState(null);
+  const [fbUser,     setFbUser]     = useState(saved?.user || null);
   const [lastSync,   setLastSync]   = useState(saved?.lastSync   ? new Date(saved.lastSync)   : null);
   const [lastUpload, setLastUpload] = useState(saved?.lastUpload ? new Date(saved.lastUpload) : null);
   const [startupDone, setStartupDone] = useState(false);
@@ -122,7 +124,11 @@ function useFirebaseSync(store, setStore, activeProfile, enabled=true) {
   const docRef = (uid) => window._fbDb.collection("akr_ledger").doc(cloudDocId(uid));
 
   const downloadFb = async (uid) => {
-    const snap = await docRef(uid).get();
+    const snap = await withTimeout(
+      docRef(uid).get(),
+      FIREBASE_TIMEOUT_MS,
+      "雲端資料讀取逾時，請檢查網路後再試。",
+    );
     if (!snap.exists) return { storeData: null, syncedAt: null, needsOwnershipUpgrade: false };
     const { _cloudSyncedAt, _ownerUid, ...storeData } = snap.data();
     return {
@@ -133,16 +139,22 @@ function useFirebaseSync(store, setStore, activeProfile, enabled=true) {
   };
 
   const uploadFb = async (uid, data) => {
-    await docRef(uid).set({ ...data, _ownerUid: uid, _cloudSyncedAt: new Date().toISOString() });
+    await withTimeout(
+      docRef(uid).set({ ...data, _ownerUid: uid, _cloudSyncedAt: new Date().toISOString() }),
+      FIREBASE_TIMEOUT_MS,
+      "雲端資料上傳逾時，請檢查網路後再試。",
+    );
   };
 
   const justImportedRef      = useRef(false);
   const startupJustSyncedRef = useRef(false);
   const startupRanRef = useRef(false);
   const redirectRestoreInFlightRef = useRef(false);
+  const authRestoredRef = useRef(false);
 
   useEffect(() => {
     const nextSaved = loadSaved();
+    setFbUser(nextSaved?.user || null);
     setLastSync(nextSaved?.lastSync ? new Date(nextSaved.lastSync) : null);
     setLastUpload(nextSaved?.lastUpload ? new Date(nextSaved.lastUpload) : null);
     setStartupDone(false);
@@ -150,6 +162,7 @@ function useFirebaseSync(store, setStore, activeProfile, enabled=true) {
     startupRanRef.current = false;
     justImportedRef.current = false;
     startupJustSyncedRef.current = false;
+    authRestoredRef.current = false;
   }, [profileId, enabled]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -176,23 +189,25 @@ function useFirebaseSync(store, setStore, activeProfile, enabled=true) {
       try { hasPendingRedirect = localStorage.getItem(fbRedirectKey) === "1"; } catch(e) {
         reportError("Google redirect 狀態讀取失敗", e);
       }
-      if (!currentSaved?.user && !hasPendingRedirect) return;
-      if (!hasPendingRedirect && window._fbAuth?.currentUser) return;
-      if (redirectRestoreInFlightRef.current) return;
+      if (redirectRestoreInFlightRef.current || authRestoredRef.current) return;
       redirectRestoreInFlightRef.current = true;
-      setSyncing(true);
+      const showRestoring = Boolean(currentSaved?.user || hasPendingRedirect);
+      if (showRestoring) setSyncing(true);
       setSyncError(null);
       try {
-        await loadFirebase();
+        await withTimeout(
+          loadFirebase(),
+          FIREBASE_TIMEOUT_MS,
+          "Google 登入狀態讀取逾時，請檢查網路後再試。",
+        );
         if (!alive) return;
-        if (!unsubscribe) unsubscribe = window._fbAuth.onAuthStateChanged(user => {
-          if (!alive || !user) return;
-          applyAuthUser(user, true);
-        });
 
         let redirectResult = null;
         if (hasPendingRedirect) redirectResult = await window._fbAuth.getRedirectResult();
-        const authUser = redirectResult?.user || window._fbAuth.currentUser;
+        const restoredUser = await waitForInitialAuthState(window._fbAuth);
+        if (!alive) return;
+        const authUser = redirectResult?.user || restoredUser || window._fbAuth.currentUser;
+        authRestoredRef.current = true;
         if (authUser) {
           applyAuthUser(authUser, hasPendingRedirect);
         } else if (hasPendingRedirect && alive) {
@@ -202,30 +217,39 @@ function useFirebaseSync(store, setStore, activeProfile, enabled=true) {
             reportError("Google 同步狀態清除失敗", e);
           }
           setFbUser(null);
-          setSyncError("Google 登入已失效，請重新登入");
+          setSyncError("Google 登入已失效，請重新登入。");
         }
+
+        unsubscribe = window._fbAuth.onAuthStateChanged(user => {
+          if (!alive || !authRestoredRef.current) return;
+          if (user) {
+            applyAuthUser(user, true);
+            return;
+          }
+          const hadSavedUser = Boolean(loadSaved()?.user);
+          setFbUser(null);
+          setStartupDone(false);
+          if (hadSavedUser) {
+            try { localStorage.removeItem(fbStateKey); } catch(e) {
+              reportError("Google 同步狀態清除失敗", e);
+            }
+            setSyncError("Google 登入已失效，請重新登入。");
+          }
+        });
       } catch(e) {
         if (alive) setSyncError(e.message || "Google 登入狀態恢復失敗");
       } finally {
         redirectRestoreInFlightRef.current = false;
-        if (alive) setSyncing(false);
+        if (alive && showRestoring) setSyncing(false);
       }
     };
 
     restoreAuth();
-    const handlePageShow = () => restoreAuth();
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === "visible") restoreAuth();
-    };
-    window.addEventListener("pageshow", handlePageShow);
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-
     return () => {
       alive = false;
       redirectRestoreInFlightRef.current = false;
+      authRestoredRef.current = false;
       if (unsubscribe) unsubscribe();
-      window.removeEventListener("pageshow", handlePageShow);
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, [profileId, enabled]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -305,6 +329,7 @@ function useFirebaseSync(store, setStore, activeProfile, enabled=true) {
           await uploadFb(user.uid, storeRef.current);
         }
         const now = new Date();
+        startupRanRef.current = `${user.uid}:${profileId}`;
         setFbUser(user); setLastSync(now);
         if (!doImport) setLastUpload(now);
         setStartupDone(true);
@@ -313,6 +338,7 @@ function useFirebaseSync(store, setStore, activeProfile, enabled=true) {
       } else {
         await uploadFb(user.uid, storeRef.current);
         const now = new Date();
+        startupRanRef.current = `${user.uid}:${profileId}`;
         setFbUser(user); setLastSync(now); setLastUpload(now);
         setStartupDone(true);
         persistState(user, now, now);
@@ -2485,7 +2511,7 @@ function OtherView({store, setStore}) {
     }
   };
   const aboutRows = [
-    ["版本","v2.4.9",false],
+    ["版本","v2.4.10",false],
     ["製作者","AKiRa",true],
     ["技術","React · Capacitor",false],
     ["支援幣種","MOP · HKD · CNY · JPY · TWD",false],
