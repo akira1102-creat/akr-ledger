@@ -2,16 +2,16 @@
   "name": "錢有數",
   "short_name": "錢有數",
   "description": "簡潔、私隱優先的繁體中文個人記帳工具",
-  "start_url": "./index.html",
-  "scope": "./",
+  "start_url": "/akr-ledger/",
+  "scope": "/akr-ledger/",
   "display": "standalone",
   "orientation": "portrait",
   "background_color": "#F8F9FA",
   "theme_color": "#F8F9FA",
   "lang": "zh-Hant",
   "icons": [
-    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
-    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+    { "src": "/akr-ledger/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "/akr-ledger/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
   ],
   "categories": ["finance", "productivity", "lifestyle"],
   "shortcuts": [
@@ -19,8 +19,8 @@
       "name": "新增記帳",
       "short_name": "記帳",
       "description": "快速新增一筆記帳",
-      "url": "./index.html?action=add",
-      "icons": [{"src": "icon-192.png", "sizes": "192x192", "type": "image/png"}]
+      "url": "/akr-ledger/?action=add",
+      "icons": [{"src": "/akr-ledger/icon-192.png", "sizes": "192x192", "type": "image/png"}]
     }
   ]
 }

@@ -26,6 +26,13 @@ if (!htmlSource) throw new Error("Vite build did not emit an HTML entry.");
 copyFile(path.join(dist, htmlSource), path.join(root, "index.html"));
 copyDir(path.join(dist, "assets"), path.join(root, "assets"));
 
+// iOS Home Screen shortcuts created from older hashed manifests may still
+// launch /assets/index.html. Keep that historical path as a safe redirect.
+fs.writeFileSync(path.join(root, "assets", "index.html"), `<!doctype html>
+<html lang="zh-Hant"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="refresh" content="0;url=../"></head>
+<body><script>location.replace("../"+location.search+location.hash);</script><p>正在開啟錢有數…</p></body></html>
+`, "utf8");
+
 for (const entry of fs.readdirSync(dist, { withFileTypes: true })) {
   if (!entry.isFile() || entry.name === htmlSource) continue;
   copyFile(path.join(dist, entry.name), path.join(root, entry.name));
