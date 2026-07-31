@@ -112,6 +112,12 @@ function useFirebaseSync(store, setStore, activeProfile, enabled=true) {
     photoURL: user.photoURL,
   } : null;
 
+  const clearRedirectPending = () => {
+    try { localStorage.removeItem(fbRedirectKey); } catch(e) {
+      reportError("Google redirect 狀態清除失敗", e);
+    }
+  };
+
   const cloudDocId = (uid) => profileId === DEFAULT_PROFILE_ID ? uid : `${uid}__profile__${profileId}`;
   const docRef = (uid) => window._fbDb.collection("akr_ledger").doc(cloudDocId(uid));
 
@@ -249,25 +255,33 @@ function useFirebaseSync(store, setStore, activeProfile, enabled=true) {
         const isStandalone = window.matchMedia?.("(display-mode: standalone)").matches
           || navigator.standalone === true;
         if (isStandalone) {
-          try { localStorage.setItem(fbRedirectKey, "1"); } catch(err) {
-            reportError("Google redirect 狀態儲存失敗", err, "Google 登入狀態儲存失敗，請重試。");
-          }
-          await window._fbAuth.signInWithRedirect(provider);
-          return;
-        }
-        try {
-          result = await window._fbAuth.signInWithPopup(provider);
-        } catch(e) {
-          if (["auth/popup-blocked", "auth/operation-not-supported-in-this-environment", "auth/cancelled-popup-request"].includes(e.code)) {
-            try { localStorage.setItem(fbRedirectKey, "1"); } catch(err) {
-              reportError("Google redirect 狀態儲存失敗", err, "Google 登入狀態儲存失敗，請重試。");
+          clearRedirectPending();
+          try {
+            result = await window._fbAuth.signInWithPopup(provider);
+          } catch(e) {
+            if (["auth/popup-blocked", "auth/operation-not-supported-in-this-environment", "auth/cancelled-popup-request"].includes(e.code)) {
+              throw new Error("Google 登入視窗未能開啟；請允許彈出視窗後再試，或從 Safari 網頁版開啟帳本登入。");
             }
-            await window._fbAuth.signInWithRedirect(provider);
-            return;
+            throw e;
           }
-          throw e;
+        }
+        else {
+          clearRedirectPending();
+          try {
+            result = await window._fbAuth.signInWithPopup(provider);
+          } catch(e) {
+            if (["auth/popup-blocked", "auth/operation-not-supported-in-this-environment", "auth/cancelled-popup-request"].includes(e.code)) {
+              try { localStorage.setItem(fbRedirectKey, "1"); } catch(err) {
+                reportError("Google redirect 狀態儲存失敗", err, "Google 登入狀態儲存失敗，請重試。");
+              }
+              await window._fbAuth.signInWithRedirect(provider);
+              return;
+            }
+            throw e;
+          }
         }
       }
+      clearRedirectPending();
       const user = toFbUser(result.user);
       if (authOnly || !enabled) {
         setFbUser(user);
@@ -2471,7 +2485,7 @@ function OtherView({store, setStore}) {
     }
   };
   const aboutRows = [
-    ["版本","v2.4.8",false],
+    ["版本","v2.4.9",false],
     ["製作者","AKiRa",true],
     ["技術","React · Capacitor",false],
     ["支援幣種","MOP · HKD · CNY · JPY · TWD",false],
