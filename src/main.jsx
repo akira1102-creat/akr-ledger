@@ -968,7 +968,6 @@ function App() {
   const activeProfile = profiles.find(p => p.id === activeProfileId) || profiles[0] || defaultProfile();
   const [store, setStore] = useState(() => loadStore(activeProfile.id));
   const [appError, setAppError] = useState(null);
-  const [swUpdate, setSwUpdate] = useState(null);
   const [tab, setTab] = useState("home");
   const [tabDir, setTabDir] = useState(0);
   const [monthPickerOpen, setMonthPickerOpen] = useState(false);
@@ -1154,7 +1153,7 @@ function App() {
       clearTimeout(timer);
       timer = setTimeout(() => setAppError(null), 5000);
     };
-    const onSwUpdate = e => setSwUpdate(e.detail);
+    const onSwUpdate = e => e.detail?.reload?.();
     window.addEventListener("akr-app-error", onAppError);
     window.addEventListener("akr-sw-update", onSwUpdate);
     return () => {
@@ -1420,16 +1419,8 @@ function App() {
         <UndoToast onUndo={undoDelete} onDismiss={()=>setUndoEntry(null)}/>
       )}
       {appError && (
-        <div className={`fixed left-4 right-4 ${swUpdate ? "bottom-40" : "bottom-24"} z-[70] bg-red-500 text-white rounded-xl shadow-lg px-4 py-3 text-sm`}>
+        <div className="fixed left-4 right-4 bottom-24 z-[70] bg-red-500 text-white rounded-xl shadow-lg px-4 py-3 text-sm">
           {appError}
-        </div>
-      )}
-      {swUpdate && (
-        <div className="fixed left-4 right-4 bottom-24 z-[80] bg-gray-900 text-white rounded-xl shadow-lg px-4 py-3 flex items-center justify-between gap-3">
-          <span className="text-sm">有新版本可以使用。</span>
-          <button onClick={swUpdate.reload} className="shrink-0 px-3 py-1.5 rounded-lg bg-white text-gray-900 text-sm font-semibold">
-            重新載入
-          </button>
         </div>
       )}
     </div>
@@ -2443,7 +2434,7 @@ function OtherView({store, setStore}) {
     }
   };
   const aboutRows = [
-    ["版本","v2.4.6",false],
+    ["版本","v2.4.7",false],
     ["製作者","AKiRa",true],
     ["技術","React · Capacitor",false],
     ["支援幣種","MOP · HKD · CNY · JPY · TWD",false],
@@ -3893,21 +3884,21 @@ if (!isNative() && "serviceWorker" in navigator) {
     refreshing = true;
     window.location.reload();
   });
-  navigator.serviceWorker.register("sw.js").then(reg => {
-    const notifyUpdate = worker => {
-      window.dispatchEvent(new CustomEvent("akr-sw-update", {
-        detail: {
-          reload: () => worker.postMessage({ type: "SKIP_WAITING" }),
-        },
-      }));
-    };
-    if (reg.waiting && navigator.serviceWorker.controller) notifyUpdate(reg.waiting);
+  navigator.serviceWorker.register(new URL("sw.js", document.baseURI), { updateViaCache: "none" }).then(reg => {
+    const activateUpdate = worker => worker.postMessage({ type: "SKIP_WAITING" });
+    if (reg.waiting) activateUpdate(reg.waiting);
     reg.addEventListener("updatefound", () => {
       const worker = reg.installing;
       if (!worker) return;
       worker.addEventListener("statechange", () => {
-        if (worker.state === "installed" && navigator.serviceWorker.controller) notifyUpdate(worker);
+        if (worker.state === "installed") activateUpdate(worker);
       });
+    });
+    const checkForUpdate = () => reg.update().catch(() => {});
+    checkForUpdate();
+    window.addEventListener("pageshow", checkForUpdate);
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") checkForUpdate();
     });
   }).catch(e => reportError("Service Worker 註冊失敗", e));
 }

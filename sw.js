@@ -1,6 +1,6 @@
 // 錢有數 Service Worker
 // ⚠️ 每次部署新版本，請遞增 CACHE 版本號，舊快取會在 activate 時自動清除
-const CACHE = "qys-ledger-mobile-v246";
+const CACHE = "qys-ledger-mobile-v247";
 
 const STATIC_ASSETS = [
   "./manifest.json",
@@ -43,16 +43,17 @@ self.addEventListener("fetch", e => {
   const isSameOrigin = url.origin === location.origin;
   const isHTML = req.destination === "document" || url.pathname.endsWith(".html") || url.pathname === "/" || url.pathname.endsWith("/");
 
-  // ── 同源 HTML：Stale-while-revalidate（快取即時回應，背景更新）
+  // ── 同源 HTML：Network-first，開啟時優先取得最新入口
   if (isSameOrigin && isHTML) {
     e.respondWith(
-      caches.match(req).then(cached => {
-        const fetcher = fetch(req).then(res => {
-          const copy = res.clone();
-          caches.open(CACHE).then(c => c.put(req, copy)).catch(() => {});
+      fetch(req, { cache: "no-store" }).then(res => {
+        if (!res.ok) return res;
+        return caches.open(CACHE).then(c => {
+          c.put(req, res.clone()).catch(() => {});
           return res;
-        }).catch(() => cached);
-        return fetcher || cached;
+        });
+      }).catch(() => {
+        return caches.match(req);
       })
     );
     return;
