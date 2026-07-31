@@ -133,6 +133,7 @@ function useFirebaseSync(store, setStore, activeProfile, enabled=true) {
   const justImportedRef      = useRef(false);
   const startupJustSyncedRef = useRef(false);
   const startupRanRef = useRef(false);
+  const redirectRestoreInFlightRef = useRef(false);
 
   useEffect(() => {
     const nextSaved = loadSaved();
@@ -146,43 +147,79 @@ function useFirebaseSync(store, setStore, activeProfile, enabled=true) {
   }, [profileId, enabled]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    const currentSaved = loadSaved();
-    const shouldRestore = !!currentSaved?.user || localStorage.getItem(fbRedirectKey) === "1";
-    if (!shouldRestore) return;
-
     let alive = true;
     let unsubscribe = null;
-    (async () => {
+
+    const applyAuthUser = (authUser, clearPending=false) => {
+      if (!authUser || !alive) return false;
+      const nextUser = toFbUser(authUser);
+      setFbUser(nextUser);
+      setStartupDone(false);
+      persistState(nextUser, lastSync, lastUpload);
+      if (clearPending) {
+        try { localStorage.removeItem(fbRedirectKey); } catch(e) {
+          reportError("Google redirect 狀態清除失敗", e);
+        }
+      }
+      return true;
+    };
+
+    const restoreAuth = async () => {
+      const currentSaved = loadSaved();
+      let hasPendingRedirect = false;
+      try { hasPendingRedirect = localStorage.getItem(fbRedirectKey) === "1"; } catch(e) {
+        reportError("Google redirect 狀態讀取失敗", e);
+      }
+      if (!currentSaved?.user && !hasPendingRedirect) return;
+      if (!hasPendingRedirect && window._fbAuth?.currentUser) return;
+      if (redirectRestoreInFlightRef.current) return;
+      redirectRestoreInFlightRef.current = true;
+      setSyncing(true);
+      setSyncError(null);
       try {
         await loadFirebase();
-        await window._fbAuth.getRedirectResult().catch(e => {
-          if (alive) setSyncError(e.message || "Google redirect 登入失敗");
-        });
         if (!alive) return;
-        unsubscribe = window._fbAuth.onAuthStateChanged(user => {
-          if (!alive) return;
-          try { localStorage.removeItem(fbRedirectKey); } catch(e) {
-            reportError("Google redirect 狀態清除失敗", e);
-          }
-          const nextUser = toFbUser(user);
-          setFbUser(nextUser);
-          if (nextUser) {
-            persistState(nextUser, lastSync, lastUpload);
-          } else if (currentSaved?.user) {
-            try { localStorage.removeItem(fbStateKey); } catch(e) {
-              reportError("Google 同步狀態清除失敗", e);
-            }
-            setSyncError("Google 登入已失效，請重新登入");
-          }
+        if (!unsubscribe) unsubscribe = window._fbAuth.onAuthStateChanged(user => {
+          if (!alive || !user) return;
+          applyAuthUser(user, true);
         });
+
+        let redirectResult = null;
+        if (hasPendingRedirect) redirectResult = await window._fbAuth.getRedirectResult();
+        const authUser = redirectResult?.user || window._fbAuth.currentUser;
+        if (authUser) {
+          applyAuthUser(authUser, hasPendingRedirect);
+        } else if (hasPendingRedirect && alive) {
+          setSyncError("Google 登入未完成，請重新按登入。");
+        } else if (currentSaved?.user && alive) {
+          try { localStorage.removeItem(fbStateKey); } catch(e) {
+            reportError("Google 同步狀態清除失敗", e);
+          }
+          setFbUser(null);
+          setSyncError("Google 登入已失效，請重新登入");
+        }
       } catch(e) {
         if (alive) setSyncError(e.message || "Google 登入狀態恢復失敗");
+      } finally {
+        redirectRestoreInFlightRef.current = false;
+        if (alive) setSyncing(false);
       }
-    })();
+    };
+
+    restoreAuth();
+    const handlePageShow = () => restoreAuth();
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") restoreAuth();
+    };
+    window.addEventListener("pageshow", handlePageShow);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
 
     return () => {
       alive = false;
+      redirectRestoreInFlightRef.current = false;
       if (unsubscribe) unsubscribe();
+      window.removeEventListener("pageshow", handlePageShow);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, [profileId, enabled]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -2434,7 +2471,7 @@ function OtherView({store, setStore}) {
     }
   };
   const aboutRows = [
-    ["版本","v2.4.7",false],
+    ["版本","v2.4.8",false],
     ["製作者","AKiRa",true],
     ["技術","React · Capacitor",false],
     ["支援幣種","MOP · HKD · CNY · JPY · TWD",false],
@@ -3373,6 +3410,9 @@ function FirebaseSyncPanel({ fbDrive, dataModified }) {
           <div className="text-xs text-gray-400 leading-relaxed">
             登入後同步目前帳本；不同帳本會分開備份，同一帳號可保存多個用戶。
           </div>
+          {fbDrive.syncError && (
+            <div className="text-xs text-amber-600 bg-amber-50 px-3 py-2 rounded-xl">⚠️ {fbDrive.syncError}</div>
+          )}
           {showApple && (
             <button onClick={()=>fbDrive.connect("apple")} disabled={fbDrive.syncing}
               className="w-full py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-50 active:opacity-80 flex items-center justify-center gap-2 bg-black">
@@ -3417,6 +3457,9 @@ function FirebaseMembershipLogin({ fbDrive }) {
         </>
       ) : (
         <>
+          {fbDrive.syncError && (
+            <div className="text-xs text-amber-600 bg-amber-50 px-3 py-2 rounded-xl">⚠️ {fbDrive.syncError}</div>
+          )}
           {showApple && (
             <button onClick={()=>fbDrive.connect("apple")} disabled={fbDrive.syncing}
               className="w-full py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-50 bg-black">
