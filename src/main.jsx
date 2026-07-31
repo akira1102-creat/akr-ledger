@@ -2434,7 +2434,7 @@ function OtherView({store, setStore}) {
     }
   };
   const aboutRows = [
-    ["版本","v2.4.3",false],
+    ["版本","v2.4.4",false],
     ["製作者","AKiRa",true],
     ["技術","React · Capacitor",false],
     ["支援幣種","MOP · HKD · CNY · JPY · TWD",false],
@@ -3608,7 +3608,7 @@ function EntryModal({entry, seed, store, base, rates, onSave, onDelete, onSectio
   const paymentMethods = store.paymentMethods || PAYMENT_METHODS;
   const [calcOpen, setCalcOpen] = useState(!initial.amount);
   const [calcExpr, setCalcExpr] = useState(initial.amount ? String(initial.amount) : "");
-  const [openEntryDetails, setOpenEntryDetails] = useState({date:isEdit,note:isEdit});
+  const [openEntryDetails, setOpenEntryDetails] = useState({date:true,note:true});
   const [showAllCategories, setShowAllCategories] = useState(isEdit);
   // 初始展開：新增時預設第一個主分類；編輯時還原子分類所屬的父分類
   const [catTab, setCatTab] = useState(()=>{
