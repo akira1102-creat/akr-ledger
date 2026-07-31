@@ -209,6 +209,15 @@ function useFirebaseSync(store, setStore, activeProfile, enabled=true) {
           : firebase.auth.GoogleAuthProvider.credential(nativeResult.credential?.idToken);
         result = await window._fbAuth.signInWithCredential(credential);
       } else {
+        const isStandalone = window.matchMedia?.("(display-mode: standalone)").matches
+          || navigator.standalone === true;
+        if (isStandalone) {
+          try { localStorage.setItem(fbRedirectKey, "1"); } catch(err) {
+            reportError("Google redirect 狀態儲存失敗", err, "Google 登入狀態儲存失敗，請重試。");
+          }
+          await window._fbAuth.signInWithRedirect(provider);
+          return;
+        }
         try {
           result = await window._fbAuth.signInWithPopup(provider);
         } catch(e) {
@@ -2434,7 +2443,7 @@ function OtherView({store, setStore}) {
     }
   };
   const aboutRows = [
-    ["版本","v2.4.5",false],
+    ["版本","v2.4.6",false],
     ["製作者","AKiRa",true],
     ["技術","React · Capacitor",false],
     ["支援幣種","MOP · HKD · CNY · JPY · TWD",false],
