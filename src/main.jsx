@@ -2600,7 +2600,7 @@ function OtherView({store, setStore}) {
     }
   };
   const aboutRows = [
-    ["版本","v2.4.11",false],
+    ["版本","v2.4.12",false],
     ["製作者","AKiRa",true],
     ["技術","React · Capacitor",false],
     ["支援幣種","MOP · HKD · CNY · JPY · TWD",false],
@@ -3948,7 +3948,7 @@ function EntryModal({entry, seed, store, base, rates, onSave, onDelete, onSectio
           <EntrySectionHandle label="日期" drag={drag}/>
         </div>
         {openEntryDetails.date&&(
-          <div className="detail-panel mt-3">
+           <div className="detail-panel entry-date-panel mt-3">
             <div className="flex gap-2 mb-2">
               {[["今天",0],["昨天",1],["前天",2]].map(([label,days])=>{
                 const target=new Date(); target.setDate(target.getDate()-days); const value=toISO(target);
@@ -3957,7 +3957,7 @@ function EntryModal({entry, seed, store, base, rates, onSave, onDelete, onSectio
               })}
             </div>
             <input type="date" value={date} onChange={event=>setDate(event.target.value)}
-              className="w-full min-w-0 max-w-full border border-gray-200 rounded-xl px-4 py-3 text-sm"
+              className="entry-date-input w-full min-w-0 max-w-full border border-gray-200 rounded-xl px-4 py-3 text-sm"
               style={{boxSizing:"border-box"}}/>
           </div>
         )}

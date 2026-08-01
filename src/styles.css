@@ -157,6 +157,14 @@
     color:#64748b; background:#fff; font-size:13px; font-weight:700;
   }
   .detail-panel { border-radius:16px; padding:13px; background:#f8fafc; }
+  /* iOS Safari gives date inputs an intrinsic internal width that can escape the card. */
+  .entry-date-panel { overflow:hidden; }
+  .entry-date-input {
+    display:block; width:100%; min-width:0 !important; max-width:100%; overflow:hidden;
+    -webkit-appearance:none; appearance:none;
+  }
+  .entry-date-input::-webkit-date-and-time-value { min-width:0; text-align:center; }
+  .entry-date-input::-webkit-calendar-picker-indicator { margin:0; padding:0; }
   .privacy-status-card {
     display:flex; align-items:flex-start; gap:12px; padding:15px;
     border:1px solid #d8f4e8; border-radius:18px; color:#176b50; background:#f1fcf7;
