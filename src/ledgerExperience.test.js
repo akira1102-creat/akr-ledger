@@ -53,6 +53,17 @@ test("自訂快速範本資料無效時會安全回到自動範本", () => {
   assert.equal(templates[0].category, "breakfast");
 });
 
+test("自訂快速範本最多保留20個", () => {
+  const custom = Array.from({length: 25}, (_, index) => ({
+    category: "breakfast",
+    amount: index + 1,
+    memo: `模板${index + 1}`,
+  }));
+  const templates = buildQuickTemplates([], categories, "MOP", PAYMENT_METHODS, custom);
+  assert.equal(templates.length, 20);
+  assert.equal(templates[19].memo, "模板20");
+});
+
 test("每週洞察正確比較今週與上週", () => {
   const insight = getWeeklyInsight([
     { type: "expense", date: "2026-07-20", amount: 80 },

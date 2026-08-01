@@ -6,6 +6,9 @@ export const PAYMENT_METHODS = [
   { id: "credit_card", label: "信用卡", icon: "💳" },
 ];
 
+export const MAX_QUICK_TEMPLATES = 20;
+export const HOME_QUICK_TEMPLATE_LIMIT = 5;
+
 export const DEFAULT_ENTRY_SECTION_ORDER = ["payment", "category", "date", "note"];
 
 export function normalizeEntrySectionOrder(order) {
@@ -39,7 +42,7 @@ export function buildQuickTemplates(entries = [], categories = [], baseCurrency 
 
   if (Array.isArray(customTemplates) && customTemplates.length > 0) {
     const custom = customTemplates
-      .slice(0, 3)
+      .slice(0, MAX_QUICK_TEMPLATES)
       .map(template => {
         const amount = Number(template?.amount);
         if (!template || !categoryIds.has(template.category) || !Number.isFinite(amount) || amount <= 0) return null;

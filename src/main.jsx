@@ -18,6 +18,8 @@ import {
   buildQuickTemplates,
   DEFAULT_ENTRY_SECTION_ORDER,
   getWeeklyInsight,
+  HOME_QUICK_TEMPLATE_LIMIT,
+  MAX_QUICK_TEMPLATES,
   normalizeEntrySectionOrder,
   PAYMENT_METHODS,
   reorderEntrySections,
@@ -618,6 +620,7 @@ const normalizeStore = (s) => {
     s.paymentMethods = PAYMENT_METHODS.map(method => ({...method}));
   }
   if (s.quickTemplates !== null && !Array.isArray(s.quickTemplates)) s.quickTemplates = null;
+  if (Array.isArray(s.quickTemplates)) s.quickTemplates = s.quickTemplates.slice(0, MAX_QUICK_TEMPLATES);
   if (!s.settings) s.settings = defaultStore().settings;
   s.settings.entrySectionOrder = normalizeEntrySectionOrder(s.settings.entrySectionOrder);
   if (s.settings.noDecimals == null) s.settings.noDecimals = false;
@@ -1049,6 +1052,7 @@ function App() {
   const [tab, setTab] = useState("home");
   const [tabDir, setTabDir] = useState(0);
   const [monthPickerOpen, setMonthPickerOpen] = useState(false);
+  const [settingsTabRequest, setSettingsTabRequest] = useState(null);
   const TAB_ORDER = ["home","cal","chart","fun","set"];
   const tabRef = useRef(tab);
   const changeTab = useCallback((newTab) => {
@@ -1057,6 +1061,11 @@ function App() {
     setTabDir(TAB_ORDER.indexOf(newTab)>TAB_ORDER.indexOf(cur)?1:-1);
     setTab(newTab);
   }, []);
+  const openQuickTemplateSettings = useCallback(() => {
+    setSettingsTabRequest("quick");
+    changeTab("set");
+  }, [changeTab]);
+  const clearSettingsTabRequest = useCallback(() => setSettingsTabRequest(null), []);
   const [mountedTabs, setMountedTabs] = useState(()=>new Set([tab]));
   useEffect(()=>{ setMountedTabs(prev=>{ const s=new Set(prev); s.add(tab); return s; }); },[tab]);
 
@@ -1435,13 +1444,13 @@ function App() {
             style={{display:tab===t?"":"none"}}>
             {mountedTabs.has(t)&&(
               <>
-                {t==="home"  && <HomeView store={store} rates={rates} base={base} entries={monthEntries} allEntries={store.entries} onQuickAdd={openAdd} onEdit={openEdit} onDelete={removeEntry} onCopy={openCopy} monthTotals={monthTotals} viewMonth={viewMonth}/>}
+                {t==="home"  && <HomeView store={store} rates={rates} base={base} entries={monthEntries} allEntries={store.entries} onQuickAdd={openAdd} onOpenQuickTemplates={openQuickTemplateSettings} onEdit={openEdit} onDelete={removeEntry} onCopy={openCopy} monthTotals={monthTotals} viewMonth={viewMonth}/>}
                 {t==="cal"   && <CalendarView store={store} rates={rates} base={base} viewMonth={viewMonth} entries={monthEntries} onEdit={openEdit}/>}
                 {t==="chart" && (subscription.isPremium
                   ? <ChartView store={store} rates={rates} base={base} entries={monthEntries} allEntries={store.entries} viewMonth={viewMonth} onEdit={openEdit}/>
                   : <PremiumGate title="完整收支分析" description="升級 Premium 查看趨勢、分類分佈及預算分析。" onUpgrade={openPremium}/>)}
                 {t==="fun"   && <FunView store={store}/>}
-                {t==="set"   && <SettingsView store={store} setStore={setStore} fbDrive={fbDrive} profiles={profiles} activeProfileId={activeProfile.id} onSwitchProfile={switchProfile} onCreateProfile={createProfile} onRenameProfile={renameProfile} onDeleteProfile={deleteProfile} subscription={subscription} onUpgrade={openPremium}/>}
+                {t==="set"   && <SettingsView store={store} setStore={setStore} fbDrive={fbDrive} profiles={profiles} activeProfileId={activeProfile.id} onSwitchProfile={switchProfile} onCreateProfile={createProfile} onRenameProfile={renameProfile} onDeleteProfile={deleteProfile} subscription={subscription} onUpgrade={openPremium} initialTab={settingsTabRequest} onInitialTabHandled={clearSettingsTabRequest}/>}
               </>
             )}
           </div>
@@ -1604,7 +1613,7 @@ function MiniDonut({topP,topCatMap,total,base,nd}) {
   );
 }
 
-function HomeView({store, rates, base, entries, allEntries, onQuickAdd, onEdit, onDelete, onCopy, monthTotals, viewMonth}) {
+function HomeView({store, rates, base, entries, allEntries, onQuickAdd, onOpenQuickTemplates, onEdit, onDelete, onCopy, monthTotals, viewMonth}) {
   const nd = store.settings?.noDecimals||false;
 
   // 今日：每日午夜自動更新
@@ -1696,6 +1705,14 @@ function HomeView({store, rates, base, entries, allEntries, onQuickAdd, onEdit, 
     ()=>buildQuickTemplates(allEntries, store.categories.expense, base, store.paymentMethods, store.quickTemplates),
     [allEntries, store.categories.expense, base, store.paymentMethods, store.quickTemplates],
   );
+  const [showAllQuickTemplates, setShowAllQuickTemplates] = useState(false);
+  const hasMoreQuickTemplates = quickTemplates.length > HOME_QUICK_TEMPLATE_LIMIT;
+  const visibleQuickTemplates = showAllQuickTemplates
+    ? quickTemplates
+    : quickTemplates.slice(0, HOME_QUICK_TEMPLATE_LIMIT);
+  useEffect(() => {
+    if (!hasMoreQuickTemplates) setShowAllQuickTemplates(false);
+  }, [hasMoreQuickTemplates]);
   const weeklyInsight = useMemo(
     ()=>getWeeklyInsight(allEntries, {
       today: now,
@@ -1874,15 +1891,18 @@ function HomeView({store, rates, base, entries, allEntries, onQuickAdd, onEdit, 
   return (
     <div className="px-3 pt-3 space-y-3">
       <section className="quick-entry-card">
-        <div className="flex items-start justify-between gap-3">
+        <div className="quick-template-card-header">
           <div>
             <div className="quick-entry-kicker">最快 3 秒完成</div>
             <div className="text-lg font-bold mt-0.5">記低先，之後先整理</div>
           </div>
-          <button onClick={()=>onQuickAdd()} className="quick-entry-button">＋ 快速記帳</button>
+          <div className="quick-template-header-actions">
+            <button type="button" onClick={onOpenQuickTemplates} className="quick-template-edit-button" aria-label="編輯快速記帳模板">編輯</button>
+            <button type="button" onClick={()=>onQuickAdd()} className="quick-entry-button">＋ 快速記帳</button>
+          </div>
         </div>
         <div className="quick-template-grid">
-          {quickTemplates.map((template,index)=>{
+          {visibleQuickTemplates.map((template,index)=>{
             const category=store.categories.expense.find(item=>item.id===template.category) || {};
             const method=(store.paymentMethods || PAYMENT_METHODS).find(item=>item.id===template.paymentMethod);
             return (
@@ -1896,6 +1916,11 @@ function HomeView({store, rates, base, entries, allEntries, onQuickAdd, onEdit, 
             );
           })}
         </div>
+        {hasMoreQuickTemplates && (
+          <button type="button" onClick={()=>setShowAllQuickTemplates(value=>!value)} className="quick-template-more">
+            {showAllQuickTemplates ? "收起模板" : `更多模板（還有 ${quickTemplates.length - HOME_QUICK_TEMPLATE_LIMIT} 個）`}
+          </button>
+        )}
       </section>
       <section className={`weekly-insight weekly-insight-${weeklyInsight.tone}`}>
         <span className="weekly-insight-icon">{weeklyInsight.tone==="positive"?"↘":weeklyInsight.tone==="warning"?"↗":"✦"}</span>
@@ -2493,24 +2518,37 @@ function QuickTemplateSettings({store, setStore}) {
     paymentMethod: "",
     memo: "",
   }), [firstCategory?.id, base]);
-  const fillSlots = useCallback(items => Array.from({length:3}, (_, index) => ({
-    ...(items[index] || emptyTemplate()),
-  })), [emptyTemplate]);
+  const isCustom = Array.isArray(store.quickTemplates) && store.quickTemplates.length > 0;
+  const fillSlots = useCallback((items, customMode = false) => {
+    const source = Array.isArray(items) ? items.slice(0, MAX_QUICK_TEMPLATES) : [];
+    const length = customMode ? Math.max(3, source.length) : 3;
+    return Array.from({length}, (_, index) => ({
+      ...(source[index] || emptyTemplate()),
+    }));
+  }, [emptyTemplate]);
   const effectiveTemplates = useMemo(
     () => buildQuickTemplates(store.entries || [], categories, base, paymentMethods, store.quickTemplates),
     [store.entries, categories, base, paymentMethods, store.quickTemplates],
   );
-  const [draft, setDraft] = useState(() => fillSlots(effectiveTemplates));
+  const [draft, setDraft] = useState(() => fillSlots(effectiveTemplates, isCustom));
 
   useEffect(() => {
-    setDraft(fillSlots(effectiveTemplates));
-  }, [effectiveTemplates, fillSlots]);
+    setDraft(fillSlots(effectiveTemplates, isCustom));
+  }, [effectiveTemplates, fillSlots, isCustom]);
 
   const updateDraft = (index, field, value) => setDraft(items => items.map((item, itemIndex) => (
     itemIndex === index ? {...item, [field]: value} : item
   )));
+  const addTemplate = () => {
+    if (draft.length >= MAX_QUICK_TEMPLATES) return;
+    setDraft(items => [...items, emptyTemplate()]);
+  };
+  const removeTemplate = index => {
+    if (draft.length <= 3) return;
+    setDraft(items => items.filter((_, itemIndex) => itemIndex !== index));
+  };
   const saveTemplates = () => {
-    const next = draft.map(item => ({
+    const next = draft.slice(0, MAX_QUICK_TEMPLATES).map(item => ({
       type: "expense",
       category: item.category,
       amount: Number(item.amount) || 1,
@@ -2522,19 +2560,23 @@ function QuickTemplateSettings({store, setStore}) {
   };
   const resetTemplates = () => {
     setStore(s => ({...s, quickTemplates: null, _lastModified: new Date().toISOString()}));
-    setDraft(fillSlots(autoTemplates));
+    setDraft(fillSlots(autoTemplates, false));
   };
-  const isCustom = Array.isArray(store.quickTemplates) && store.quickTemplates.length > 0;
 
   return (
     <div className="space-y-3">
       <div className="bg-white rounded-2xl shadow-sm p-4">
         <div className="text-sm font-semibold">首頁快速記帳模板</div>
-        <div className="text-xs text-gray-400 mt-1">設定首頁三格固定按鈕；儲存後，新記帳不會再取代佢哋。</div>
+        <div className="text-xs text-gray-400 mt-1">設定首頁最多 20 個固定按鈕；首頁預設顯示 5 個，按「更多」查看其餘模板。</div>
       </div>
       {draft.map((template, index) => (
         <div key={index} className="bg-white rounded-2xl shadow-sm p-3 space-y-2">
-          <div className="text-xs font-semibold text-gray-500">第 {index + 1} 格</div>
+          <div className="flex items-center justify-between gap-2">
+            <div className="text-xs font-semibold text-gray-500">第 {index + 1} 格</div>
+            {draft.length > 3 && (
+              <button type="button" onClick={()=>removeTemplate(index)} className="text-xs font-semibold text-red-400 px-2 py-1 rounded-lg bg-red-50">移除</button>
+            )}
+          </div>
           <div className="grid grid-cols-[minmax(0,1fr)_92px] gap-2">
             <select value={template.category} onChange={event=>updateDraft(index,"category",event.target.value)}
               className="border border-gray-200 rounded-xl px-3 py-2.5 text-sm bg-white">
@@ -2555,6 +2597,11 @@ function QuickTemplateSettings({store, setStore}) {
           </div>
         </div>
       ))}
+      {draft.length < MAX_QUICK_TEMPLATES && (
+        <button type="button" onClick={addTemplate} className="w-full py-3 rounded-xl text-sm font-semibold border border-dashed border-cyan-200 text-cyan-600 bg-cyan-50/60">
+          ＋ 新增模板（{draft.length}/{MAX_QUICK_TEMPLATES}）
+        </button>
+      )}
       <div className="flex gap-2">
         <button onClick={saveTemplates} className="flex-1 py-3 rounded-xl text-sm font-semibold text-white" style={{background:"var(--brand)"}}>儲存固定模板</button>
         <button onClick={resetTemplates} className="px-3 py-3 rounded-xl text-sm font-semibold bg-gray-100 text-gray-500">恢復自動</button>
@@ -2600,7 +2647,7 @@ function OtherView({store, setStore}) {
     }
   };
   const aboutRows = [
-    ["版本","v2.4.12",false],
+    ["版本","v2.4.13",false],
     ["製作者","AKiRa",true],
     ["技術","React · Capacitor",false],
     ["支援幣種","MOP · HKD · CNY · JPY · TWD",false],
@@ -2994,8 +3041,13 @@ function ProfileSettings({profiles, activeProfileId, onSwitchProfile, onCreatePr
     </div>
   );
 }
-function SettingsView({store, setStore, fbDrive, profiles, activeProfileId, onSwitchProfile, onCreateProfile, onRenameProfile, onDeleteProfile, subscription, onUpgrade}) {
+function SettingsView({store, setStore, fbDrive, profiles, activeProfileId, onSwitchProfile, onCreateProfile, onRenameProfile, onDeleteProfile, subscription, onUpgrade, initialTab, onInitialTabHandled}) {
   const [tab, setTab] = useState(null);
+  useEffect(() => {
+    if (!initialTab) return;
+    setTab(initialTab);
+    onInitialTabHandled?.();
+  }, [initialTab, onInitialTabHandled]);
   useEffect(()=>{
     if(tab){ setLayer('settingsTab', ()=>setTab(null)); }
     else { clearLayer('settingsTab'); }
@@ -3005,7 +3057,7 @@ function SettingsView({store, setStore, fbDrive, profiles, activeProfileId, onSw
     {key:"premium",icon:"✨", label:subscription.isPremium?"Premium 使用中":"升級 Premium", desc:"訂閱、恢復購買及管理計劃", bg:"#FFFBEB"},
     {key:"profile",icon:"👤", label:"帳本 / 用戶", desc:"切換或新增獨立記帳用戶",       bg:"#EEF2FF"},
     {key:"layout",icon:"📐", label:"頁面佈局",   desc:"調整首頁、月曆、圖表的卡片順序及顯示", bg:"#F0F4FF"},
-    {key:"quick", icon:"⚡", label:"快速記帳模板", desc:"自訂首頁三格固定快速記帳按鈕",       bg:"#ECFEFF"},
+    {key:"quick", icon:"⚡", label:"快速記帳模板", desc:"自訂首頁最多 20 個固定快速記帳按鈕",       bg:"#ECFEFF"},
     {key:"cat",   icon:"🏷️", label:"分類管理",   desc:"編輯收支分類及付款方式",       bg:"#FFF0F3"},
     {key:"budget",icon:"💰", label:"預算設定",   desc:"設定月度總預算及各分類上限",   bg:"#F0FFF4"},
     {key:"data",  icon:"📁", label:"數據與同步", desc:"備份、匯入匯出、雲端同步",     bg:"#EFF6FF"},

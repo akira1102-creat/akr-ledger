@@ -1,6 +1,6 @@
 // 錢有數 Service Worker
 // ⚠️ 每次部署新版本，請遞增 CACHE 版本號，舊快取會在 activate 時自動清除
-const CACHE = "qys-ledger-mobile-v2412";
+const CACHE = "qys-ledger-mobile-v2413";
 
 const STATIC_ASSETS = [
   "./manifest.json",
