@@ -4,6 +4,7 @@ import {
   buildQuickTemplates,
   getWeeklyInsight,
   normalizeEntrySectionOrder,
+  PAYMENT_METHODS,
   reorderEntrySections,
 } from "./ledgerExperience.js";
 
@@ -29,6 +30,27 @@ test("自訂付款方式移除預設方式後，快速範本不會引用失效�
     { id: "cash", label: "現金", icon: "💵" },
   ]);
   assert.deepEqual(templates.map(item => item.paymentMethod), ["", "", "cash"]);
+});
+
+test("自訂快速範本會固定順序，不會被最新記帳取代", () => {
+  const entries = [
+    { type: "expense", category: "drink", amount: 99, paymentMethod: "cash", memo: "最新記錄", date: "2026-08-03" },
+    { type: "expense", category: "breakfast", amount: 32, paymentMethod: "octopus", memo: "早餐", date: "2026-08-02" },
+  ];
+  const custom = [
+    { category: "breakfast", amount: 45, paymentMethod: "payme", memo: "固定早餐" },
+    { category: "drink", amount: 18, paymentMethod: "cash", memo: "固定飲品" },
+  ];
+  const templates = buildQuickTemplates(entries, categories, "MOP", PAYMENT_METHODS, custom);
+  assert.deepEqual(templates.map(item => item.memo), ["固定早餐", "固定飲品"]);
+  assert.deepEqual(templates.map(item => item.amount), [45, 18]);
+});
+
+test("自訂快速範本資料無效時會安全回到自動範本", () => {
+  const templates = buildQuickTemplates([], categories, "MOP", PAYMENT_METHODS, [
+    { category: "missing", amount: 0, paymentMethod: "unknown", memo: "無效" },
+  ]);
+  assert.equal(templates[0].category, "breakfast");
 });
 
 test("每週洞察正確比較今週與上週", () => {

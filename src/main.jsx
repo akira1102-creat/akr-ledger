@@ -617,6 +617,7 @@ const normalizeStore = (s) => {
   if (!Array.isArray(s.paymentMethods) || s.paymentMethods.length === 0) {
     s.paymentMethods = PAYMENT_METHODS.map(method => ({...method}));
   }
+  if (s.quickTemplates !== null && !Array.isArray(s.quickTemplates)) s.quickTemplates = null;
   if (!s.settings) s.settings = defaultStore().settings;
   s.settings.entrySectionOrder = normalizeEntrySectionOrder(s.settings.entrySectionOrder);
   if (s.settings.noDecimals == null) s.settings.noDecimals = false;
@@ -1692,8 +1693,8 @@ function HomeView({store, rates, base, entries, allEntries, onQuickAdd, onEdit, 
 
   const [ym1,ym2] = viewMonth.split("-");
   const quickTemplates = useMemo(
-    ()=>buildQuickTemplates(allEntries, store.categories.expense, base, store.paymentMethods),
-    [allEntries, store.categories.expense, base, store.paymentMethods],
+    ()=>buildQuickTemplates(allEntries, store.categories.expense, base, store.paymentMethods, store.quickTemplates),
+    [allEntries, store.categories.expense, base, store.paymentMethods, store.quickTemplates],
   );
   const weeklyInsight = useMemo(
     ()=>getWeeklyInsight(allEntries, {
@@ -2475,6 +2476,94 @@ function LayoutSettings({store, setStore}) {
   );
 }
 
+function QuickTemplateSettings({store, setStore}) {
+  const categories = store.categories?.expense || [];
+  const paymentMethods = store.paymentMethods || PAYMENT_METHODS;
+  const base = store.settings?.baseCurrency || "MOP";
+  const autoTemplates = useMemo(
+    () => buildQuickTemplates(store.entries || [], categories, base, paymentMethods),
+    [store.entries, categories, base, paymentMethods],
+  );
+  const firstCategory = categories.find(category => category.parentId) || categories[0];
+  const emptyTemplate = useCallback(() => ({
+    type: "expense",
+    category: firstCategory?.id || "",
+    amount: 1,
+    currency: base,
+    paymentMethod: "",
+    memo: "",
+  }), [firstCategory?.id, base]);
+  const fillSlots = useCallback(items => Array.from({length:3}, (_, index) => ({
+    ...(items[index] || emptyTemplate()),
+  })), [emptyTemplate]);
+  const effectiveTemplates = useMemo(
+    () => buildQuickTemplates(store.entries || [], categories, base, paymentMethods, store.quickTemplates),
+    [store.entries, categories, base, paymentMethods, store.quickTemplates],
+  );
+  const [draft, setDraft] = useState(() => fillSlots(effectiveTemplates));
+
+  useEffect(() => {
+    setDraft(fillSlots(effectiveTemplates));
+  }, [effectiveTemplates, fillSlots]);
+
+  const updateDraft = (index, field, value) => setDraft(items => items.map((item, itemIndex) => (
+    itemIndex === index ? {...item, [field]: value} : item
+  )));
+  const saveTemplates = () => {
+    const next = draft.map(item => ({
+      type: "expense",
+      category: item.category,
+      amount: Number(item.amount) || 1,
+      currency: base,
+      paymentMethod: paymentMethods.some(method => method.id === item.paymentMethod) ? item.paymentMethod : "",
+      memo: String(item.memo || "").trim(),
+    }));
+    setStore(s => ({...s, quickTemplates: next, _lastModified: new Date().toISOString()}));
+  };
+  const resetTemplates = () => {
+    setStore(s => ({...s, quickTemplates: null, _lastModified: new Date().toISOString()}));
+    setDraft(fillSlots(autoTemplates));
+  };
+  const isCustom = Array.isArray(store.quickTemplates) && store.quickTemplates.length > 0;
+
+  return (
+    <div className="space-y-3">
+      <div className="bg-white rounded-2xl shadow-sm p-4">
+        <div className="text-sm font-semibold">首頁快速記帳模板</div>
+        <div className="text-xs text-gray-400 mt-1">設定首頁三格固定按鈕；儲存後，新記帳不會再取代佢哋。</div>
+      </div>
+      {draft.map((template, index) => (
+        <div key={index} className="bg-white rounded-2xl shadow-sm p-3 space-y-2">
+          <div className="text-xs font-semibold text-gray-500">第 {index + 1} 格</div>
+          <div className="grid grid-cols-[minmax(0,1fr)_92px] gap-2">
+            <select value={template.category} onChange={event=>updateDraft(index,"category",event.target.value)}
+              className="border border-gray-200 rounded-xl px-3 py-2.5 text-sm bg-white">
+              {categories.map(category=><option key={category.id} value={category.id}>{category.icon} {category.name}</option>)}
+            </select>
+            <input type="number" min="0.01" step="0.01" value={template.amount}
+              onChange={event=>updateDraft(index,"amount",event.target.value)}
+              className="border border-gray-200 rounded-xl px-3 py-2.5 text-sm" placeholder="金額"/>
+          </div>
+          <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-2">
+            <select value={template.paymentMethod} onChange={event=>updateDraft(index,"paymentMethod",event.target.value)}
+              className="border border-gray-200 rounded-xl px-3 py-2.5 text-sm bg-white">
+              <option value="">不指定付款方式</option>
+              {paymentMethods.map(method=><option key={method.id} value={method.id}>{method.icon} {method.label}</option>)}
+            </select>
+            <input value={template.memo} onChange={event=>updateDraft(index,"memo",event.target.value)}
+              className="border border-gray-200 rounded-xl px-3 py-2.5 text-sm" placeholder="備注（可留空）"/>
+          </div>
+        </div>
+      ))}
+      <div className="flex gap-2">
+        <button onClick={saveTemplates} className="flex-1 py-3 rounded-xl text-sm font-semibold text-white" style={{background:"var(--brand)"}}>儲存固定模板</button>
+        <button onClick={resetTemplates} className="px-3 py-3 rounded-xl text-sm font-semibold bg-gray-100 text-gray-500">恢復自動</button>
+      </div>
+      <div className="text-[11px] text-gray-400 px-1">目前模式：{isCustom ? "自訂固定模板" : "自動使用最近記帳"}</div>
+    </div>
+  );
+}
+
 function OtherView({store, setStore}) {
   const [theme, setTheme] = useState(()=>localStorage.getItem("akr-theme")||"system");
   const applyTheme = (t) => {
@@ -2511,7 +2600,7 @@ function OtherView({store, setStore}) {
     }
   };
   const aboutRows = [
-    ["版本","v2.4.10",false],
+    ["版本","v2.4.11",false],
     ["製作者","AKiRa",true],
     ["技術","React · Capacitor",false],
     ["支援幣種","MOP · HKD · CNY · JPY · TWD",false],
@@ -2916,6 +3005,7 @@ function SettingsView({store, setStore, fbDrive, profiles, activeProfileId, onSw
     {key:"premium",icon:"✨", label:subscription.isPremium?"Premium 使用中":"升級 Premium", desc:"訂閱、恢復購買及管理計劃", bg:"#FFFBEB"},
     {key:"profile",icon:"👤", label:"帳本 / 用戶", desc:"切換或新增獨立記帳用戶",       bg:"#EEF2FF"},
     {key:"layout",icon:"📐", label:"頁面佈局",   desc:"調整首頁、月曆、圖表的卡片順序及顯示", bg:"#F0F4FF"},
+    {key:"quick", icon:"⚡", label:"快速記帳模板", desc:"自訂首頁三格固定快速記帳按鈕",       bg:"#ECFEFF"},
     {key:"cat",   icon:"🏷️", label:"分類管理",   desc:"編輯收支分類及付款方式",       bg:"#FFF0F3"},
     {key:"budget",icon:"💰", label:"預算設定",   desc:"設定月度總預算及各分類上限",   bg:"#F0FFF4"},
     {key:"data",  icon:"📁", label:"數據與同步", desc:"備份、匯入匯出、雲端同步",     bg:"#EFF6FF"},
@@ -2953,6 +3043,7 @@ function SettingsView({store, setStore, fbDrive, profiles, activeProfileId, onSw
         {tab==="premium" && <PremiumView subscription={subscription} fbDrive={fbDrive} onRefreshMembership={refreshMembership}/>}
         {tab==="profile" && <ProfileSettings profiles={profiles} activeProfileId={activeProfileId} onSwitchProfile={onSwitchProfile} onCreateProfile={onCreateProfile} onRenameProfile={onRenameProfile} onDeleteProfile={onDeleteProfile} isPremium={subscription.isPremium} onUpgrade={onUpgrade}/>}
         {tab==="layout" && (subscription.isPremium ? <LayoutSettings store={store} setStore={setStore}/> : <PremiumGate title="自訂頁面佈局" description="Premium 可以調整卡片順序同顯示內容。" onUpgrade={onUpgrade}/>)}
+        {tab==="quick"  && <QuickTemplateSettings store={store} setStore={setStore}/>}
         {tab==="cat"    && (subscription.isPremium ? <CatSettings store={store} setStore={setStore}/> : <PremiumGate title="自訂分類及付款方式" description="Premium 可以編輯收支分類同付款方式。" onUpgrade={onUpgrade}/>)}
         {tab==="budget" && <BudgetSettings store={store} setStore={setStore}/>}
         {tab==="data"   && <DataSettings store={store} setStore={setStore} fbDrive={fbDrive} isPremium={subscription.isPremium} onUpgrade={onUpgrade}/>}

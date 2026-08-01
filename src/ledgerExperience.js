@@ -33,9 +33,29 @@ const FALLBACK_TEMPLATES = [
   { type: "expense", category: "drink", amount: 28, paymentMethod: "cash", memo: "飲品" },
 ];
 
-export function buildQuickTemplates(entries = [], categories = [], baseCurrency = "MOP", paymentMethods = PAYMENT_METHODS) {
+export function buildQuickTemplates(entries = [], categories = [], baseCurrency = "MOP", paymentMethods = PAYMENT_METHODS, customTemplates = null) {
   const categoryIds = new Set(categories.map(category => category.id));
   const paymentMethodIds = new Set(paymentMethods.map(method => method.id));
+
+  if (Array.isArray(customTemplates) && customTemplates.length > 0) {
+    const custom = customTemplates
+      .slice(0, 3)
+      .map(template => {
+        const amount = Number(template?.amount);
+        if (!template || !categoryIds.has(template.category) || !Number.isFinite(amount) || amount <= 0) return null;
+        return {
+          type: "expense",
+          category: template.category,
+          amount,
+          currency: template.currency || baseCurrency,
+          paymentMethod: paymentMethodIds.has(template.paymentMethod) ? template.paymentMethod : "",
+          memo: String(template.memo || "").trim(),
+        };
+      })
+      .filter(Boolean);
+    if (custom.length > 0) return custom;
+  }
+
   const seen = new Set();
   const templates = [];
   const candidates = [...entries]
