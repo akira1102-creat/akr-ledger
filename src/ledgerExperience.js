@@ -11,6 +11,48 @@ export const HOME_QUICK_TEMPLATE_LIMIT = 5;
 
 export const DEFAULT_ENTRY_SECTION_ORDER = ["payment", "category", "date", "note"];
 
+export const ENTRY_SECTION_IDS = [...DEFAULT_ENTRY_SECTION_ORDER];
+export const DEFAULT_ENTRY_SECTION_VISIBILITY = Object.fromEntries(
+  ENTRY_SECTION_IDS.map(id => [id, true]),
+);
+
+export function normalizeEntrySectionVisibility(visibility) {
+  return ENTRY_SECTION_IDS.reduce((result, id) => {
+    result[id] = typeof visibility?.[id] === "boolean"
+      ? visibility[id]
+      : DEFAULT_ENTRY_SECTION_VISIBILITY[id];
+    return result;
+  }, {});
+}
+
+export function incrementCategoryUsage(usage, categoryId) {
+  if (!categoryId) return { ...(usage || {}) };
+  const current = Number(usage?.[categoryId]);
+  return {
+    ...(usage || {}),
+    [categoryId]: Number.isFinite(current) && current >= 0 ? current + 1 : 1,
+  };
+}
+
+export function getMostUsedCategories(categories = [], usage = {}, limit = 10) {
+  const parentIds = new Set(
+    categories.filter(category => category?.parentId).map(category => category.parentId),
+  );
+  const candidates = categories.filter(
+    category => category && (category.parentId || !parentIds.has(category.id)),
+  );
+  const max = Math.max(0, Math.trunc(Number(limit) || 0));
+  return candidates
+    .map((category, index) => ({
+      category,
+      index,
+      count: Number.isFinite(Number(usage?.[category.id])) ? Number(usage[category.id]) : 0,
+    }))
+    .sort((a, b) => b.count - a.count || a.index - b.index)
+    .slice(0, max)
+    .map(item => item.category);
+}
+
 export function normalizeEntrySectionOrder(order) {
   const expanded = Array.isArray(order)
     ? order.flatMap(id => id === "details" ? ["date", "note"] : [id])

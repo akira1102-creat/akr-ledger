@@ -2,11 +2,49 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   buildQuickTemplates,
+  getMostUsedCategories,
   getWeeklyInsight,
+  incrementCategoryUsage,
   normalizeEntrySectionOrder,
+  normalizeEntrySectionVisibility,
   PAYMENT_METHODS,
   reorderEntrySections,
 } from "./ledgerExperience.js";
+
+test("分類快速卡按本機使用次數穩定取出最多十個可選分類", () => {
+  const categories = [
+    { id: "parent", name: "父分類" },
+    ...Array.from({ length: 12 }, (_, index) => ({ id: `cat${index + 1}`, parentId: "parent" })),
+    { id: "empty-parent", name: "沒有子分類" },
+  ];
+  const usage = { cat12: 2, cat3: 7, cat1: 7, cat11: 1, parent: 99 };
+
+  assert.deepEqual(
+    getMostUsedCategories(categories, usage, 10).map(category => category.id),
+    ["cat1", "cat3", "cat12", "cat11", "cat2", "cat4", "cat5", "cat6", "cat7", "cat8"],
+  );
+});
+
+test("分類使用次數只在本機資料模型中遞增", () => {
+  assert.deepEqual(incrementCategoryUsage({ breakfast: 2 }, "breakfast"), { breakfast: 3 });
+  assert.deepEqual(incrementCategoryUsage({}, "drink"), { drink: 1 });
+  assert.deepEqual(incrementCategoryUsage({ breakfast: 2 }, ""), { breakfast: 2 });
+});
+
+test("記帳卡片隱藏設定缺漏時保留四張卡並接受布林值", () => {
+  assert.deepEqual(normalizeEntrySectionVisibility({ category: false, note: true }), {
+    payment: true,
+    category: false,
+    date: true,
+    note: true,
+  });
+  assert.deepEqual(normalizeEntrySectionVisibility({ payment: "no", unknown: false }), {
+    payment: true,
+    category: true,
+    date: true,
+    note: true,
+  });
+});
 
 const categories = [{ id: "breakfast" }, { id: "transit" }, { id: "drink" }];
 

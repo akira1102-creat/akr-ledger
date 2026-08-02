@@ -17,10 +17,14 @@ import { waitForInitialAuthState, withTimeout } from "./firebaseAsync";
 import {
   buildQuickTemplates,
   DEFAULT_ENTRY_SECTION_ORDER,
+  DEFAULT_ENTRY_SECTION_VISIBILITY,
+  getMostUsedCategories,
   getWeeklyInsight,
   HOME_QUICK_TEMPLATE_LIMIT,
+  incrementCategoryUsage,
   MAX_QUICK_TEMPLATES,
   normalizeEntrySectionOrder,
+  normalizeEntrySectionVisibility,
   PAYMENT_METHODS,
   reorderEntrySections,
 } from "./ledgerExperience";
@@ -552,6 +556,21 @@ const PROFILES_KEY = "akr_profiles_v1";
 const ACTIVE_PROFILE_KEY = "akr_active_profile_v1";
 const profileStoreKey = id => id === DEFAULT_PROFILE_ID ? STORE_KEY : `${STORE_KEY}_${id}`;
 const profileScopedKey = (key, id) => id === DEFAULT_PROFILE_ID ? key : `${key}_${id}`;
+const CATEGORY_USAGE_KEY = "akr_category_usage_v1";
+const categoryUsageKey = id => profileScopedKey(CATEGORY_USAGE_KEY, id);
+const loadCategoryUsage = profileId => {
+  try {
+    const raw = localStorage.getItem(categoryUsageKey(profileId));
+    const parsed = raw ? JSON.parse(raw) : null;
+    return parsed && typeof parsed === "object" ? parsed : { expense:{}, income:{} };
+  } catch {
+    return { expense:{}, income:{} };
+  }
+};
+const saveCategoryUsage = (profileId, usage) => {
+  try { localStorage.setItem(categoryUsageKey(profileId), JSON.stringify(usage)); }
+  catch(e) { reportError("分類使用記錄儲存失敗", e); }
+};
 const defaultProfile = () => ({
   id: DEFAULT_PROFILE_ID,
   name: "自己",
@@ -592,7 +611,12 @@ const defaultStore = () => ({
   paymentMethods: PAYMENT_METHODS.map(method => ({...method})),
   budgets: {},
   totalBudget: 0,
-  settings: { baseCurrency:"MOP", rates: DEFAULT_RATES, entrySectionOrder:[...DEFAULT_ENTRY_SECTION_ORDER] },
+  settings: {
+    baseCurrency:"MOP",
+    rates: DEFAULT_RATES,
+    entrySectionOrder:[...DEFAULT_ENTRY_SECTION_ORDER],
+    entrySectionVisibility:{...DEFAULT_ENTRY_SECTION_VISIBILITY},
+  },
 });
 // Ensure all required fields exist (used after load or cloud import)
 const DEFAULT_LAYOUT = {
@@ -623,6 +647,7 @@ const normalizeStore = (s) => {
   if (Array.isArray(s.quickTemplates)) s.quickTemplates = s.quickTemplates.slice(0, MAX_QUICK_TEMPLATES);
   if (!s.settings) s.settings = defaultStore().settings;
   s.settings.entrySectionOrder = normalizeEntrySectionOrder(s.settings.entrySectionOrder);
+  s.settings.entrySectionVisibility = normalizeEntrySectionVisibility(s.settings.entrySectionVisibility);
   if (s.settings.noDecimals == null) s.settings.noDecimals = false;
   if (s.settings.weekStart == null) s.settings.weekStart = "mon";
   if (!s.layout) {
@@ -1048,6 +1073,7 @@ function App() {
   const [activeProfileId, setActiveProfileId] = useState(() => loadActiveProfileId());
   const activeProfile = profiles.find(p => p.id === activeProfileId) || profiles[0] || defaultProfile();
   const [store, setStore] = useState(() => loadStore(activeProfile.id));
+  const [categoryUsage, setCategoryUsage] = useState(() => loadCategoryUsage(activeProfile.id));
   const [appError, setAppError] = useState(null);
   const [tab, setTab] = useState("home");
   const [tabDir, setTabDir] = useState(0);
@@ -1182,6 +1208,7 @@ function App() {
     saveActiveProfileId(id);
     setActiveProfileId(id);
     setStore(loadStore(id));
+    setCategoryUsage(loadCategoryUsage(id));
     setViewMonth(monthKey(new Date()));
     setUndoEntry(null);
     setEditing(null);
@@ -1201,6 +1228,7 @@ function App() {
     saveActiveProfileId(id);
     setActiveProfileId(id);
     setStore(loadStore(id));
+    setCategoryUsage(loadCategoryUsage(id));
     setViewMonth(monthKey(new Date()));
     setUndoEntry(null);
     setEditing(null);
@@ -1223,6 +1251,7 @@ function App() {
       localStorage.removeItem(profileScopedKey(FB_STATE_KEY, id));
       localStorage.removeItem(profileScopedKey(FB_REDIRECT_KEY, id));
       localStorage.removeItem(profileScopedKey("akr-last-rate-date", id));
+      localStorage.removeItem(categoryUsageKey(id));
     } catch(e) { reportError("帳本資料刪除失敗", e); }
     setProfiles(nextProfiles);
     if (id === activeProfile.id) {
@@ -1230,6 +1259,7 @@ function App() {
       saveActiveProfileId(nextId);
       setActiveProfileId(nextId);
       setStore(loadStore(nextId));
+      setCategoryUsage(loadCategoryUsage(nextId));
     }
   }, [activeProfile.id, profiles]);
 
@@ -1353,6 +1383,19 @@ function App() {
   }, [monthEntries, rates, base, store.totalBudget, store.budgetInBalance, store.useMonthlyBudget, store.monthlyBudgets, viewMonth]);
 
   const [undoEntry, setUndoEntry] = useState(null);
+
+  const recordCategoryUse = useCallback((type, categoryId) => {
+    if (!categoryId) return;
+    const categoryType = type === "income" ? "income" : "expense";
+    setCategoryUsage(previous => {
+      const next = {
+        ...(previous || {}),
+        [categoryType]: incrementCategoryUsage(previous?.[categoryType], categoryId),
+      };
+      saveCategoryUsage(activeProfile.id, next);
+      return next;
+    });
+  }, [activeProfile.id]);
 
   const upsertEntry = (entry) => {
     setStore(s => {
@@ -1478,7 +1521,8 @@ function App() {
           store={store}
           base={base}
           rates={rates}
-          onSave={e=>{upsertEntry(e);handleEntryClose();}}
+          categoryUsage={categoryUsage}
+          onSave={e=>{upsertEntry(e);recordCategoryUse(e.type,e.category);handleEntryClose();}}
           onDelete={id=>{removeEntry(id);handleEntryClose();}}
           onSectionOrderChange={entrySectionOrder=>setStore(s=>({
             ...s,
@@ -2501,6 +2545,62 @@ function LayoutSettings({store, setStore}) {
   );
 }
 
+const ENTRY_SECTION_LABELS = {
+  payment: "付款方式",
+  category: "分類",
+  date: "日期",
+  note: "備註",
+};
+
+function EntryLayoutSettings({store, setStore}) {
+  const order = normalizeEntrySectionOrder(store.settings?.entrySectionOrder);
+  const visibility = normalizeEntrySectionVisibility(store.settings?.entrySectionVisibility);
+  const toggleVisible = id => setStore(current => ({
+    ...current,
+    settings: {
+      ...current.settings,
+      entrySectionVisibility: {
+        ...normalizeEntrySectionVisibility(current.settings?.entrySectionVisibility),
+        [id]: !normalizeEntrySectionVisibility(current.settings?.entrySectionVisibility)[id],
+      },
+    },
+    _lastModified: new Date().toISOString(),
+  }));
+  const reorder = (from, to) => setStore(current => {
+    const nextOrder = reorderEntrySections(current.settings?.entrySectionOrder, from, to);
+    return {
+      ...current,
+      settings: {...current.settings, entrySectionOrder: nextOrder},
+      _lastModified: new Date().toISOString(),
+    };
+  });
+
+  return (
+    <div className="space-y-3">
+      <div className="bg-white rounded-2xl shadow-sm p-4">
+        <div className="text-sm font-semibold text-gray-700">記帳頁面卡片</div>
+        <div className="text-xs text-gray-400 mt-1">可隱藏不常用卡片；拖曳左側把手可調整上下順序。</div>
+      </div>
+      <SortableList
+        items={order.map(id=>({id}))}
+        itemHeight={58}
+        onReorder={reorder}
+        renderItem={(item, _index, drag) => (
+          <div className={`bg-white rounded-2xl shadow-sm px-3 py-3 flex items-center gap-3 mb-2 ${drag.isDragging?"ring-2 ring-[color:var(--brand)]":""}`}>
+            <div onPointerDown={drag.handlePointerDown} onPointerMove={drag.handlePointerMove} onPointerUp={drag.handlePointerUp}
+              className="text-gray-300 text-lg px-1 cursor-grab active:cursor-grabbing select-none flex-shrink-0" style={{touchAction:"none"}}>⠿</div>
+            <span className="flex-1 text-sm font-medium text-gray-700">{ENTRY_SECTION_LABELS[item.id]}</span>
+            <button type="button" aria-label={`${visibility[item.id]?"隱藏":"顯示"}${ENTRY_SECTION_LABELS[item.id]}`} onClick={()=>toggleVisible(item.id)}
+              className={`relative w-11 h-6 rounded-full transition-colors flex-shrink-0 ${visibility[item.id]?"bg-[color:var(--brand)]":"bg-gray-200"}`}>
+              <span className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-all ${visibility[item.id]?"left-5":"left-0.5"}`}/>
+            </button>
+          </div>
+        )}
+      />
+    </div>
+  );
+}
+
 function QuickTemplateSettings({store, setStore}) {
   const categories = store.categories?.expense || [];
   const paymentMethods = store.paymentMethods || PAYMENT_METHODS;
@@ -2647,7 +2747,7 @@ function OtherView({store, setStore}) {
     }
   };
   const aboutRows = [
-    ["版本","v2.4.13",false],
+    ["版本","v2.4.14",false],
     ["製作者","AKiRa",true],
     ["技術","React · Capacitor",false],
     ["支援幣種","MOP · HKD · CNY · JPY · TWD",false],
@@ -3057,6 +3157,7 @@ function SettingsView({store, setStore, fbDrive, profiles, activeProfileId, onSw
     {key:"premium",icon:"✨", label:subscription.isPremium?"Premium 使用中":"升級 Premium", desc:"訂閱、恢復購買及管理計劃", bg:"#FFFBEB"},
     {key:"profile",icon:"👤", label:"帳本 / 用戶", desc:"切換或新增獨立記帳用戶",       bg:"#EEF2FF"},
     {key:"layout",icon:"📐", label:"頁面佈局",   desc:"調整首頁、月曆、圖表的卡片順序及顯示", bg:"#F0F4FF"},
+    {key:"entry", icon:"🧾", label:"記帳頁面", desc:"設定付款方式、分類、日期及備註卡片顯示", bg:"#ECFEFF"},
     {key:"quick", icon:"⚡", label:"快速記帳模板", desc:"自訂首頁最多 20 個固定快速記帳按鈕",       bg:"#ECFEFF"},
     {key:"cat",   icon:"🏷️", label:"分類管理",   desc:"編輯收支分類及付款方式",       bg:"#FFF0F3"},
     {key:"budget",icon:"💰", label:"預算設定",   desc:"設定月度總預算及各分類上限",   bg:"#F0FFF4"},
@@ -3095,6 +3196,7 @@ function SettingsView({store, setStore, fbDrive, profiles, activeProfileId, onSw
         {tab==="premium" && <PremiumView subscription={subscription} fbDrive={fbDrive} onRefreshMembership={refreshMembership}/>}
         {tab==="profile" && <ProfileSettings profiles={profiles} activeProfileId={activeProfileId} onSwitchProfile={onSwitchProfile} onCreateProfile={onCreateProfile} onRenameProfile={onRenameProfile} onDeleteProfile={onDeleteProfile} isPremium={subscription.isPremium} onUpgrade={onUpgrade}/>}
         {tab==="layout" && (subscription.isPremium ? <LayoutSettings store={store} setStore={setStore}/> : <PremiumGate title="自訂頁面佈局" description="Premium 可以調整卡片順序同顯示內容。" onUpgrade={onUpgrade}/>)}
+        {tab==="entry"  && <EntryLayoutSettings store={store} setStore={setStore}/>}
         {tab==="quick"  && <QuickTemplateSettings store={store} setStore={setStore}/>}
         {tab==="cat"    && (subscription.isPremium ? <CatSettings store={store} setStore={setStore}/> : <PremiumGate title="自訂分類及付款方式" description="Premium 可以編輯收支分類同付款方式。" onUpgrade={onUpgrade}/>)}
         {tab==="budget" && <BudgetSettings store={store} setStore={setStore}/>}
@@ -3816,7 +3918,7 @@ function CalcPad({expr, onKey}) {
 }
 
 /* ===================== 記帳 Modal ===================== */
-function EntryModal({entry, seed, store, base, rates, onSave, onDelete, onSectionOrderChange, onClose, closeSignal}) {
+function EntryModal({entry, seed, store, base, rates, categoryUsage, onSave, onDelete, onSectionOrderChange, onClose, closeSignal}) {
   const [exiting, setExiting] = React.useState(false);
   const [delConfirm, setDelConfirm] = React.useState(false);
   const handleClose = React.useCallback(()=>{ setExiting(true); setTimeout(onClose,230); },[onClose]);
@@ -3824,8 +3926,14 @@ function EntryModal({entry, seed, store, base, rates, onSave, onDelete, onSectio
   const isEdit = !!entry;
   const initial = entry || seed || {};
   const today = toISO(new Date());
-  const [type, setType] = useState(initial.type || "expense");
-  const [category, setCategory] = useState(initial.category || "");
+  const initialType = initial.type || "expense";
+  const initialQuickCategory = getMostUsedCategories(
+    store.categories?.[initialType] || [],
+    categoryUsage?.[initialType],
+    10,
+  )[0];
+  const [type, setType] = useState(initialType);
+  const [category, setCategory] = useState(initial.category || initialQuickCategory?.id || "");
   const [amount, setAmount] = useState(initial.amount ? String(initial.amount) : "");
   const [currency, setCurrency] = useState(initial.currency || base);
   const [date, setDate] = useState(initial.date || today);
@@ -3839,7 +3947,7 @@ function EntryModal({entry, seed, store, base, rates, onSave, onDelete, onSectio
   // 初始展開：新增時預設第一個主分類；編輯時還原子分類所屬的父分類
   const [catTab, setCatTab] = useState(()=>{
     if (!initial.category) {
-      const fp = store.categories.expense.find(c=>!c.parentId);
+      const fp = (store.categories?.[initialType] || []).find(c=>!c.parentId);
       return fp?.id || null;
     }
     const allCats=[...(store.categories.expense||[]),...(store.categories.income||[])];
@@ -3883,7 +3991,12 @@ function EntryModal({entry, seed, store, base, rates, onSave, onDelete, onSectio
 
   const cats = store.categories[type];
   const parentCats = cats.filter(c=>!c.parentId);
-  const quickCats = cats.filter(c=>c.parentId).slice(0, type==="expense"?8:6);
+  const quickCats = getMostUsedCategories(cats, categoryUsage?.[type], 10);
+  const firstSelectableCategoryId = typeName => getMostUsedCategories(
+    store.categories?.[typeName] || [],
+    categoryUsage?.[typeName],
+    10,
+  )[0]?.id || "";
   const selectedCat = cats.find(c=>c.id===category);
   const parentOfSelected = selectedCat?.parentId ? cats.find(c=>c.id===selectedCat.parentId) : null;
 
@@ -3900,6 +4013,8 @@ function EntryModal({entry, seed, store, base, rates, onSave, onDelete, onSectio
   };
 
   const entrySectionOrder = normalizeEntrySectionOrder(store.settings?.entrySectionOrder);
+  const entrySectionVisibility = normalizeEntrySectionVisibility(store.settings?.entrySectionVisibility);
+  const visibleEntrySectionOrder = entrySectionOrder.filter(id=>entrySectionVisibility[id] !== false);
   const moveEntrySection = (from, to) => {
     lightHaptic();
     onSectionOrderChange(reorderEntrySections(entrySectionOrder, from, to));
@@ -4053,7 +4168,7 @@ function EntryModal({entry, seed, store, base, rates, onSave, onDelete, onSectio
         {/* 收支切換 */}
         <div className="flex gap-2">
           {[["expense","支出","var(--expense)"],["income","收入","var(--income)"]].map(([t,l,c])=>(
-            <button key={t} onClick={()=>{ setType(t); setCategory(""); const fp=store.categories[t].find(x=>!x.parentId); setCatTab(fp?.id||null); }}
+            <button key={t} onClick={()=>{ setType(t); setCategory(firstSelectableCategoryId(t)); const fp=store.categories[t].find(x=>!x.parentId); setCatTab(fp?.id||null); }}
               className={`flex-1 py-2.5 rounded-xl text-sm font-semibold transition-all ${type===t?"text-white shadow-md":"bg-gray-100 text-gray-500"}`}
               style={{background:type===t?c:undefined}}>{l}</button>
           ))}
@@ -4079,7 +4194,7 @@ function EntryModal({entry, seed, store, base, rates, onSave, onDelete, onSectio
         </div>
 
         <ReorderableSections
-          items={entrySectionOrder.map(id=>({id}))}
+          items={visibleEntrySectionOrder.map(id=>({id}))}
           onReorder={moveEntrySection}
           renderItem={renderEntrySection}
         />
