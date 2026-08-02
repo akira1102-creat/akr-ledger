@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   buildQuickTemplates,
+  buildCategoryUsageFromEntries,
   getMostUsedCategories,
   getWeeklyInsight,
   incrementCategoryUsage,
@@ -29,6 +30,19 @@ test("分類使用次數只在本機資料模型中遞增", () => {
   assert.deepEqual(incrementCategoryUsage({ breakfast: 2 }, "breakfast"), { breakfast: 3 });
   assert.deepEqual(incrementCategoryUsage({}, "drink"), { drink: 1 });
   assert.deepEqual(incrementCategoryUsage({ breakfast: 2 }, ""), { breakfast: 2 });
+});
+
+test("可由既有記帳記錄建立一次本機分類使用次數", () => {
+  assert.deepEqual(buildCategoryUsageFromEntries([
+    { type: "expense", category: "breakfast" },
+    { type: "expense", category: "breakfast" },
+    { type: "income", category: "salary" },
+    { type: "transfer", category: "ignored" },
+    { type: "expense", category: "" },
+  ]), {
+    expense: { breakfast: 2 },
+    income: { salary: 1 },
+  });
 });
 
 test("記帳卡片隱藏設定缺漏時保留四張卡並接受布林值", () => {

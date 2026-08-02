@@ -15,6 +15,7 @@ import { isNative, lightHaptic, prepareNativeShell, setDailyReminder } from "./n
 import { useSubscription } from "./subscription";
 import { waitForInitialAuthState, withTimeout } from "./firebaseAsync";
 import {
+  buildCategoryUsageFromEntries,
   buildQuickTemplates,
   DEFAULT_ENTRY_SECTION_ORDER,
   DEFAULT_ENTRY_SECTION_VISIBILITY,
@@ -558,13 +559,23 @@ const profileStoreKey = id => id === DEFAULT_PROFILE_ID ? STORE_KEY : `${STORE_K
 const profileScopedKey = (key, id) => id === DEFAULT_PROFILE_ID ? key : `${key}_${id}`;
 const CATEGORY_USAGE_KEY = "akr_category_usage_v1";
 const categoryUsageKey = id => profileScopedKey(CATEGORY_USAGE_KEY, id);
-const loadCategoryUsage = profileId => {
+const loadCategoryUsage = (profileId, entries = []) => {
+  const empty = { expense:{}, income:{} };
   try {
     const raw = localStorage.getItem(categoryUsageKey(profileId));
     const parsed = raw ? JSON.parse(raw) : null;
-    return parsed && typeof parsed === "object" ? parsed : { expense:{}, income:{} };
+    const usage = parsed && typeof parsed === "object"
+      ? { expense:{...(parsed.expense || {})}, income:{...(parsed.income || {})} }
+      : empty;
+    const hasCount = ["expense", "income"].some(type =>
+      Object.values(usage[type]).some(count => Number(count) > 0),
+    );
+    if (hasCount || !entries.length) return usage;
+    const seeded = buildCategoryUsageFromEntries(entries);
+    saveCategoryUsage(profileId, seeded);
+    return seeded;
   } catch {
-    return { expense:{}, income:{} };
+    return empty;
   }
 };
 const saveCategoryUsage = (profileId, usage) => {
@@ -1073,7 +1084,10 @@ function App() {
   const [activeProfileId, setActiveProfileId] = useState(() => loadActiveProfileId());
   const activeProfile = profiles.find(p => p.id === activeProfileId) || profiles[0] || defaultProfile();
   const [store, setStore] = useState(() => loadStore(activeProfile.id));
-  const [categoryUsage, setCategoryUsage] = useState(() => loadCategoryUsage(activeProfile.id));
+  const [categoryUsage, setCategoryUsage] = useState(() => loadCategoryUsage(
+    activeProfile.id,
+    loadStore(activeProfile.id).entries,
+  ));
   const [appError, setAppError] = useState(null);
   const [tab, setTab] = useState("home");
   const [tabDir, setTabDir] = useState(0);
@@ -1206,9 +1220,10 @@ function App() {
     if (id === activeProfile.id) return;
     saveStore(store, activeProfile.id);
     saveActiveProfileId(id);
+    const nextStore = loadStore(id);
     setActiveProfileId(id);
-    setStore(loadStore(id));
-    setCategoryUsage(loadCategoryUsage(id));
+    setStore(nextStore);
+    setCategoryUsage(loadCategoryUsage(id, nextStore.entries));
     setViewMonth(monthKey(new Date()));
     setUndoEntry(null);
     setEditing(null);
@@ -1226,9 +1241,10 @@ function App() {
     saveStore(defaultStore(), id);
     setProfiles(prev => [...prev, profile]);
     saveActiveProfileId(id);
+    const nextStore = loadStore(id);
     setActiveProfileId(id);
-    setStore(loadStore(id));
-    setCategoryUsage(loadCategoryUsage(id));
+    setStore(nextStore);
+    setCategoryUsage(loadCategoryUsage(id, nextStore.entries));
     setViewMonth(monthKey(new Date()));
     setUndoEntry(null);
     setEditing(null);
@@ -1257,9 +1273,10 @@ function App() {
     if (id === activeProfile.id) {
       const nextId = nextProfiles[0]?.id || DEFAULT_PROFILE_ID;
       saveActiveProfileId(nextId);
+      const nextStore = loadStore(nextId);
       setActiveProfileId(nextId);
-      setStore(loadStore(nextId));
-      setCategoryUsage(loadCategoryUsage(nextId));
+      setStore(nextStore);
+      setCategoryUsage(loadCategoryUsage(nextId, nextStore.entries));
     }
   }, [activeProfile.id, profiles]);
 
@@ -2747,7 +2764,7 @@ function OtherView({store, setStore}) {
     }
   };
   const aboutRows = [
-    ["版本","v2.4.14",false],
+    ["版本","v2.4.15",false],
     ["製作者","AKiRa",true],
     ["技術","React · Capacitor",false],
     ["支援幣種","MOP · HKD · CNY · JPY · TWD",false],

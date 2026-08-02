@@ -34,6 +34,16 @@ export function incrementCategoryUsage(usage, categoryId) {
   };
 }
 
+export function buildCategoryUsageFromEntries(entries = []) {
+  return entries.reduce((usage, entry) => {
+    if (!entry?.category || !["expense", "income"].includes(entry.type)) return usage;
+    return {
+      ...usage,
+      [entry.type]: incrementCategoryUsage(usage[entry.type], entry.category),
+    };
+  }, { expense: {}, income: {} });
+}
+
 export function getMostUsedCategories(categories = [], usage = {}, limit = 10) {
   const parentIds = new Set(
     categories.filter(category => category?.parentId).map(category => category.parentId),
