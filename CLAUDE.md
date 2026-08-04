@@ -102,7 +102,7 @@ No OAuth — PAT stored in localStorage.
 --brand: #FF6B8A; --brand-soft: #FFF0F3; --income: #2ECC71; --expense: #E74C3C;
 ```
 
-## SW Cache (`sw.js`) — current: `qys-ledger-mobile-v2415`
+## SW Cache (`sw.js`) — current: `qys-ledger-mobile-v2416`
 
 HTML: network-first · static: cache-first · CDN: stale-while-revalidate
 

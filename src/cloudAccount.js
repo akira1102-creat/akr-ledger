@@ -47,6 +47,21 @@ export const mergeCloudProfiles = (localProfiles = [], cloudProfiles = []) => {
   });
 };
 
+export const isKnownProfile = (profiles = [], profileId) => (
+  Boolean(profileId) && profiles.some(profile => profile?.id === profileId)
+);
+
+export const resolveActiveProfile = (profiles = [], activeProfileId) => {
+  const profile = profiles.find(item => item?.id === activeProfileId)
+    || profiles.find(item => item?.id === "main")
+    || profiles[0]
+    || null;
+  return {
+    profile,
+    isResolved: Boolean(profile && profile.id === activeProfileId),
+  };
+};
+
 export const readAccountCloudState = async (db, uid) => {
   const [membershipSnap, profileSnap] = await Promise.all([
     db.collection(MEMBERSHIP_COLLECTION).doc(uid).get(),

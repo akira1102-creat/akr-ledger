@@ -1,6 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { hasActivePremiumMembership, mergeCloudProfiles } from "./cloudAccount.js";
+import {
+  hasActivePremiumMembership,
+  isKnownProfile,
+  mergeCloudProfiles,
+  resolveActiveProfile,
+} from "./cloudAccount.js";
 
 test("永久 Premium 會員有效", () => {
   assert.equal(hasActivePremiumMembership({
@@ -50,4 +55,25 @@ test("帳本索引可由舊式 JSON 清單讀取", async () => {
   const state = await readAccountCloudState(fakeDb, "test-uid");
   assert.equal(state.isPremium, true);
   assert.equal(state.cloudProfiles[0].id, "main");
+});
+
+test("a locally-created profile remains the active sync target when cloud index is stale", () => {
+  const localProfiles = [
+    { id: "main", name: "Main" },
+    { id: "profile_new", name: "New" },
+  ];
+  const merged = mergeCloudProfiles(localProfiles, [{ id: "main", name: "Main" }]);
+  const selection = resolveActiveProfile(merged, "profile_new");
+
+  assert.equal(isKnownProfile(merged, "profile_new"), true);
+  assert.equal(selection.profile.id, "profile_new");
+  assert.equal(selection.isResolved, true);
+});
+
+test("an unresolved profile cannot be persisted or synced", () => {
+  const selection = resolveActiveProfile([{ id: "main", name: "Main" }], "profile_missing");
+
+  assert.equal(isKnownProfile([{ id: "main" }], "profile_missing"), false);
+  assert.equal(selection.profile.id, "main");
+  assert.equal(selection.isResolved, false);
 });

@@ -7,8 +7,10 @@ import PremiumView, { PremiumBadge, PremiumGate } from "./PremiumView";
 import {
   MEMBERSHIP_COLLECTION,
   hasActivePremiumMembership,
+  isKnownProfile,
   mergeCloudProfiles,
   readAccountCloudState,
+  resolveActiveProfile,
   saveCloudProfileIndex,
 } from "./cloudAccount";
 import { isNative, lightHaptic, prepareNativeShell, setDailyReminder } from "./native";
@@ -101,6 +103,9 @@ function useFirebaseSync(store, setStore, activeProfile, enabled=true) {
 
   const storeRef = useRef(store);
   useEffect(() => { storeRef.current = store; }, [store]);
+  const profileIdRef = useRef(profileId);
+  useEffect(() => { profileIdRef.current = profileId; }, [profileId]);
+  const isCurrentProfile = expectedProfileId => profileIdRef.current === expectedProfileId;
 
   const persistState = (user, sync, upload) => {
     try {
@@ -261,6 +266,8 @@ function useFirebaseSync(store, setStore, activeProfile, enabled=true) {
   }, [profileId, enabled]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const connect = async (providerName="google", authOnly=false) => {
+    const syncProfileId = profileId;
+    const sourceStore = storeRef.current;
     setSyncing(true); setSyncError(null);
     try {
       await loadFirebase();
@@ -314,6 +321,7 @@ function useFirebaseSync(store, setStore, activeProfile, enabled=true) {
       }
       clearRedirectPending();
       const user = toFbUser(result.user);
+      if (!isCurrentProfile(syncProfileId)) return;
       if (authOnly || !enabled) {
         setFbUser(user);
         setStartupDone(false);
@@ -322,6 +330,7 @@ function useFirebaseSync(store, setStore, activeProfile, enabled=true) {
       }
 
       const { storeData: cloudData, needsOwnershipUpgrade } = await downloadFb(user.uid);
+      if (!isCurrentProfile(syncProfileId)) return;
 
       if (cloudData && cloudData.entries) {
         const doImport = window.confirm(
@@ -333,7 +342,7 @@ function useFirebaseSync(store, setStore, activeProfile, enabled=true) {
           justImportedRef.current = true;
           setStore(cloudData);
         } else {
-          await uploadFb(user.uid, storeRef.current);
+          await uploadFb(user.uid, sourceStore);
         }
         const now = new Date();
         startupRanRef.current = `${user.uid}:${profileId}`;
@@ -343,7 +352,7 @@ function useFirebaseSync(store, setStore, activeProfile, enabled=true) {
         persistState(user, now, doImport ? lastUpload : now);
         alert("✅ " + (doImport ? "已導入雲端資料，" : "已上傳本機資料，") + "Google 自動同步已啟用！");
       } else {
-        await uploadFb(user.uid, storeRef.current);
+        await uploadFb(user.uid, sourceStore);
         const now = new Date();
         startupRanRef.current = `${user.uid}:${profileId}`;
         setFbUser(user); setLastSync(now); setLastUpload(now);
@@ -399,10 +408,13 @@ function useFirebaseSync(store, setStore, activeProfile, enabled=true) {
       return;
     }
     if (!fbUser) { alert("尚未連接 Google 同步"); return; }
+    const syncProfileId = profileId;
+    const sourceStore = storeRef.current;
     setSyncing(true); setSyncError(null);
     try {
       await loadFirebase();
-      await uploadFb(fbUser.uid, storeRef.current);
+      if (!isCurrentProfile(syncProfileId)) return;
+      await uploadFb(fbUser.uid, sourceStore);
       const now = new Date();
       setLastSync(now); setLastUpload(now);
       persistState(fbUser, now, now);
@@ -423,6 +435,8 @@ function useFirebaseSync(store, setStore, activeProfile, enabled=true) {
     if (startupRanRef.current === startupKey) return;
     startupRanRef.current = startupKey;
     let alive = true;
+    const syncProfileId = profileId;
+    const sourceStore = storeRef.current;
     (async () => {
       try {
         setSyncing(true); setSyncError(null);
@@ -432,28 +446,28 @@ function useFirebaseSync(store, setStore, activeProfile, enabled=true) {
           syncedAt: cloudSyncedAt,
           needsOwnershipUpgrade,
         } = await downloadFb(fbUser.uid);
-        if (!alive) return;
+        if (!alive || !isCurrentProfile(syncProfileId)) return;
 
         if (!cloudData || !cloudData.entries) {
-          await uploadFb(fbUser.uid, storeRef.current);
-          if (alive) { const now=new Date(); setLastSync(now); setLastUpload(now); startupJustSyncedRef.current=true; setStartupDone(true); persistState(fbUser,now,now); }
+          await uploadFb(fbUser.uid, sourceStore);
+          if (alive && isCurrentProfile(syncProfileId)) { const now=new Date(); setLastSync(now); setLastUpload(now); startupJustSyncedRef.current=true; setStartupDone(true); persistState(fbUser,now,now); }
           return;
         }
 
         const cloudModMs = dateToMs(cloudData._lastModified) || dateToMs(cloudSyncedAt);
         const latestSaved = loadSaved();
-        const localModMs = dateToMs(storeRef.current._lastModified) || dateToMs(latestSaved?.lastSync);
+        const localModMs = dateToMs(sourceStore._lastModified) || dateToMs(latestSaved?.lastSync);
         const cloudIsNewer = cloudModMs > localModMs;
 
         if (cloudIsNewer) {
           normalizeStore(cloudData);
           if (needsOwnershipUpgrade) await uploadFb(fbUser.uid, cloudData);
           justImportedRef.current = true;
-          if (alive) setStore(cloudData);
+          if (alive && isCurrentProfile(syncProfileId)) setStore(cloudData);
         } else {
-          if (alive) await uploadFb(fbUser.uid, storeRef.current);
+          if (alive && isCurrentProfile(syncProfileId)) await uploadFb(fbUser.uid, sourceStore);
         }
-        if (alive) {
+        if (alive && isCurrentProfile(syncProfileId)) {
           const now = new Date();
           setLastSync(now);
           if (!cloudIsNewer) setLastUpload(now);
@@ -475,14 +489,17 @@ function useFirebaseSync(store, setStore, activeProfile, enabled=true) {
     if (!fbUser) return;
     if (!startupDone) return;
     let cancelled = false;
+    const syncProfileId = profileId;
+    const sourceStore = store;
     const timer = setTimeout(async () => {
-      if (cancelled || justImportedRef.current) { justImportedRef.current = false; return; }
+      if (cancelled || !isCurrentProfile(syncProfileId) || justImportedRef.current) { justImportedRef.current = false; return; }
       if (startupJustSyncedRef.current) { startupJustSyncedRef.current = false; return; }
       try {
         setSyncing(true); setSyncError(null);
         await loadFirebase();
-        await uploadFb(fbUser.uid, storeRef.current);
-        if (!cancelled) { const now=new Date(); setLastSync(now); setLastUpload(now); persistState(fbUser,now,now); }
+        if (cancelled || !isCurrentProfile(syncProfileId)) return;
+        await uploadFb(fbUser.uid, sourceStore);
+        if (!cancelled && isCurrentProfile(syncProfileId)) { const now=new Date(); setLastSync(now); setLastUpload(now); persistState(fbUser,now,now); }
       } catch(e) { if (!cancelled) setSyncError(e.message || "同步失敗"); }
       finally { if (!cancelled) setSyncing(false); }
     }, 1500);
@@ -1082,7 +1099,9 @@ function App() {
   const profilesRef = useRef(profiles);
   const [cloudProfilesReadyUid, setCloudProfilesReadyUid] = useState(null);
   const [activeProfileId, setActiveProfileId] = useState(() => loadActiveProfileId());
-  const activeProfile = profiles.find(p => p.id === activeProfileId) || profiles[0] || defaultProfile();
+  const activeProfileSelection = resolveActiveProfile(profiles, activeProfileId);
+  const activeProfile = activeProfileSelection.profile || defaultProfile();
+  const activeProfileReady = activeProfileSelection.isResolved;
   const [store, setStore] = useState(() => loadStore(activeProfile.id));
   const [categoryUsage, setCategoryUsage] = useState(() => loadCategoryUsage(
     activeProfile.id,
@@ -1114,7 +1133,12 @@ function App() {
   const [editing, setEditing] = useState(null);
   const [entrySeed, setEntrySeed] = useState(null);
   const [viewMonth, setViewMonth] = useState(() => { const d=new Date(); return monthKey(d); });
-  const fbDrive = useFirebaseSync(store, setStore, activeProfile, subscription.isPremium);
+  const fbDrive = useFirebaseSync(
+    store,
+    setStore,
+    activeProfile,
+    subscription.isPremium && activeProfileReady,
+  );
   const refreshMembership = useCallback(async () => {
     const uid = fbDrive.fbUser?.uid;
     if (!uid) {
@@ -1202,7 +1226,7 @@ function App() {
     const timer = setTimeout(async () => {
       try {
         await loadFirebase();
-        if (!cancelled) await saveCloudProfileIndex(window._fbDb, uid, profiles);
+        if (!cancelled) await saveCloudProfileIndex(window._fbDb, uid, profilesRef.current);
       } catch (error) {
         if (!cancelled) reportError("雲端帳本索引儲存失敗", error);
       }
@@ -1214,11 +1238,15 @@ function App() {
   }, [cloudProfilesReadyUid, fbDrive.fbUser?.uid, profiles, subscription.isPremium]);
 
   useEffect(() => { saveProfiles(profiles); }, [profiles]);
-  useEffect(() => { saveStore(store, activeProfile.id); }, [store, activeProfile.id]);
+  useEffect(() => {
+    if (!activeProfileReady || !isKnownProfile(profiles, activeProfileId)) return;
+    saveStore(store, activeProfileId);
+  }, [store, activeProfileId, activeProfileReady, profiles]);
 
   const switchProfile = useCallback((id) => {
-    if (id === activeProfile.id) return;
-    saveStore(store, activeProfile.id);
+    if (!activeProfileReady || !isKnownProfile(profilesRef.current, id)) return;
+    if (id === activeProfileId) return;
+    saveStore(store, activeProfileId);
     saveActiveProfileId(id);
     const nextStore = loadStore(id);
     setActiveProfileId(id);
@@ -1228,7 +1256,7 @@ function App() {
     setUndoEntry(null);
     setEditing(null);
     setEntryOpen(false);
-  }, [activeProfile.id, store]);
+  }, [activeProfileId, activeProfileReady, store]);
 
   const createProfile = useCallback((name) => {
     if (!subscription.isPremium) {
@@ -1239,7 +1267,9 @@ function App() {
     const id = `profile_${Date.now().toString(36)}`;
     const profile = { id, name: cleanName, createdAt: new Date().toISOString() };
     saveStore(defaultStore(), id);
-    setProfiles(prev => [...prev, profile]);
+    const nextProfiles = [...profilesRef.current, profile];
+    profilesRef.current = nextProfiles;
+    setProfiles(nextProfiles);
     saveActiveProfileId(id);
     const nextStore = loadStore(id);
     setActiveProfileId(id);
@@ -1254,14 +1284,17 @@ function App() {
   const renameProfile = useCallback((id, name) => {
     const cleanName = (name || "").trim();
     if (!cleanName) return;
-    setProfiles(prev => prev.map(p => p.id === id ? {...p, name: cleanName} : p));
+    const nextProfiles = profilesRef.current.map(p => p.id === id ? {...p, name: cleanName} : p);
+    profilesRef.current = nextProfiles;
+    setProfiles(nextProfiles);
   }, []);
 
   const deleteProfile = useCallback((id) => {
     if (id === DEFAULT_PROFILE_ID) return;
-    const current = profiles.find(p => p.id === id);
+    const currentProfiles = profilesRef.current;
+    const current = currentProfiles.find(p => p.id === id);
     if (!current || !window.confirm(`確定刪除「${current.name}」帳本？此帳本的本機資料會一併刪除。`)) return;
-    const nextProfiles = profiles.filter(p => p.id !== id);
+    const nextProfiles = currentProfiles.filter(p => p.id !== id);
     try {
       localStorage.removeItem(profileStoreKey(id));
       localStorage.removeItem(profileScopedKey(FB_STATE_KEY, id));
@@ -1269,8 +1302,9 @@ function App() {
       localStorage.removeItem(profileScopedKey("akr-last-rate-date", id));
       localStorage.removeItem(categoryUsageKey(id));
     } catch(e) { reportError("帳本資料刪除失敗", e); }
+    profilesRef.current = nextProfiles;
     setProfiles(nextProfiles);
-    if (id === activeProfile.id) {
+    if (id === activeProfileId) {
       const nextId = nextProfiles[0]?.id || DEFAULT_PROFILE_ID;
       saveActiveProfileId(nextId);
       const nextStore = loadStore(nextId);
@@ -1278,7 +1312,7 @@ function App() {
       setStore(nextStore);
       setCategoryUsage(loadCategoryUsage(nextId, nextStore.entries));
     }
-  }, [activeProfile.id, profiles]);
+  }, [activeProfileId, profiles]);
 
   useEffect(() => {
     let timer = null;
@@ -2764,7 +2798,7 @@ function OtherView({store, setStore}) {
     }
   };
   const aboutRows = [
-    ["版本","v2.4.15",false],
+    ["版本","v2.4.16",false],
     ["製作者","AKiRa",true],
     ["技術","React · Capacitor",false],
     ["支援幣種","MOP · HKD · CNY · JPY · TWD",false],
