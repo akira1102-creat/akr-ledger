@@ -53,7 +53,7 @@ test("an unresolved profile cannot be persisted or synced", () => {
   assert.equal(selection.isResolved, false);
 });
 
-test("account cloud state does not read subscription membership", async () => {
+test("account cloud state reads only the profile index", async () => {
   const requested = [];
   const fakeDb = {
     collection: name => {

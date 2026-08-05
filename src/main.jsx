@@ -3,18 +3,15 @@ import { createRoot } from "react-dom/client";
 import { Capacitor } from "@capacitor/core";
 import { App as NativeApp } from "@capacitor/app";
 import { FirebaseAuthentication } from "@capacitor-firebase/authentication";
-import PremiumView, { PremiumBadge, PremiumGate } from "./PremiumView";
 import {
-  MEMBERSHIP_COLLECTION,
-  hasActivePremiumMembership,
   isKnownProfile,
   mergeCloudProfiles,
   readAccountCloudState,
   resolveActiveProfile,
   saveCloudProfileIndex,
 } from "./cloudAccount";
+import { allFeaturesEnabled } from "./accessPolicy";
 import { isNative, lightHaptic, prepareNativeShell, setDailyReminder } from "./native";
-import { useSubscription } from "./subscription";
 import { waitForInitialAuthState, withTimeout } from "./firebaseAsync";
 import {
   buildCategoryUsageFromEntries,
@@ -404,7 +401,7 @@ function useFirebaseSync(store, setStore, activeProfile, enabled=true) {
 
   const syncNow = async () => {
     if (!enabled) {
-      setSyncError("雲端同步需要 Premium。");
+      setSyncError("雲端同步尚未準備完成。");
       return;
     }
     if (!fbUser) { alert("尚未連接 Google 同步"); return; }
@@ -1033,8 +1030,8 @@ function EntrySectionHandle({label, drag}) {
 // Named back-navigation layers — priority order is fixed (index 0 = highest).
 // Each slot holds at most one handler. consumeBack fires the highest-priority
 // active layer, so push ordering never matters.
-const _layers = { premium:null, calcPad:null, entryModal:null, chartPanel:null, chartSub:null, settingsTab:null, goHome:null };
-const _layerOrder = ['premium','calcPad','entryModal','chartPanel','chartSub','settingsTab','goHome'];
+const _layers = { calcPad:null, entryModal:null, chartPanel:null, chartSub:null, settingsTab:null, goHome:null };
+const _layerOrder = ['calcPad','entryModal','chartPanel','chartSub','settingsTab','goHome'];
 const setLayer   = (name, fn) => { _layers[name] = fn; };
 const clearLayer = (name)     => { _layers[name] = null; };
 const consumeBack = () => {
@@ -1085,16 +1082,7 @@ function useLongPress(callback, ms=520) {
 
 /* ===================== App ===================== */
 function App() {
-  const subscription = useSubscription();
-  const [paywallOpen, setPaywallOpen] = useState(false);
-  const openPremium = useCallback(() => {
-    setLayer("premium", () => setPaywallOpen(false));
-    setPaywallOpen(true);
-  }, []);
-  const closePremium = useCallback(() => {
-    clearLayer("premium");
-    setPaywallOpen(false);
-  }, []);
+  const featuresEnabled = allFeaturesEnabled();
   const [profiles, setProfiles] = useState(loadProfiles);
   const profilesRef = useRef(profiles);
   const [cloudProfilesReadyUid, setCloudProfilesReadyUid] = useState(null);
@@ -1137,21 +1125,8 @@ function App() {
     store,
     setStore,
     activeProfile,
-    subscription.isPremium && activeProfileReady,
+    featuresEnabled && activeProfileReady,
   );
-  const refreshMembership = useCallback(async () => {
-    const uid = fbDrive.fbUser?.uid;
-    if (!uid) {
-      subscription.setAccountEntitlement(false);
-      return false;
-    }
-    await loadFirebase();
-    const membershipSnap = await window._fbDb.collection(MEMBERSHIP_COLLECTION).doc(uid).get();
-    const isPremium = membershipSnap.exists
-      && hasActivePremiumMembership(membershipSnap.data());
-    subscription.setAccountEntitlement(isPremium);
-    return isPremium;
-  }, [fbDrive.fbUser?.uid, subscription.setAccountEntitlement]);
 
   useEffect(() => {
     profilesRef.current = profiles;
@@ -1159,69 +1134,37 @@ function App() {
 
   useEffect(() => {
     const uid = fbDrive.fbUser?.uid;
-    if (!uid) return;
-    let cancelled = false;
-    let unsubscribe = null;
-    loadFirebase().then(() => {
-      if (cancelled) return;
-      unsubscribe = window._fbDb.collection(MEMBERSHIP_COLLECTION).doc(uid)
-        .onSnapshot(snapshot => {
-          if (cancelled) return;
-          subscription.setAccountEntitlement(
-            snapshot.exists && hasActivePremiumMembership(snapshot.data()),
-          );
-        }, error => {
-          if (!cancelled) reportError("會員狀態監聽失敗", error);
-        });
-    }).catch(error => {
-      if (!cancelled) reportError("會員狀態連線失敗", error);
-    });
-    return () => {
-      cancelled = true;
-      unsubscribe?.();
-    };
-  }, [fbDrive.fbUser?.uid, subscription.setAccountEntitlement]);
-
-  useEffect(() => {
-    const uid = fbDrive.fbUser?.uid;
     let cancelled = false;
 
     if (!uid) {
       setCloudProfilesReadyUid(null);
-      subscription.clearIdentity();
       return () => { cancelled = true; };
     }
 
     (async () => {
       try {
-        await subscription.identify(uid);
         await loadFirebase();
         const account = await readAccountCloudState(window._fbDb, uid);
         if (cancelled) return;
-        subscription.setAccountEntitlement(account.isPremium);
         const mergedProfiles = mergeCloudProfiles(profilesRef.current, account.cloudProfiles);
         profilesRef.current = mergedProfiles;
         setProfiles(mergedProfiles);
         setCloudProfilesReadyUid(uid);
       } catch (error) {
         if (cancelled) return;
-        subscription.setAccountEntitlement(false);
         setCloudProfilesReadyUid(null);
-        reportError("會員及帳本索引讀取失敗", error, "未能確認會員或雲端帳本，請檢查網絡後重試。");
+        reportError("雲端帳本索引讀取失敗", error, "未能讀取雲端帳本，請檢查網絡後重試。");
       }
     })();
 
     return () => { cancelled = true; };
   }, [
     fbDrive.fbUser?.uid,
-    subscription.clearIdentity,
-    subscription.identify,
-    subscription.setAccountEntitlement,
   ]);
 
   useEffect(() => {
     const uid = fbDrive.fbUser?.uid;
-    if (!uid || cloudProfilesReadyUid !== uid || !subscription.isPremium) return;
+    if (!uid || cloudProfilesReadyUid !== uid) return;
     let cancelled = false;
     const timer = setTimeout(async () => {
       try {
@@ -1235,7 +1178,7 @@ function App() {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [cloudProfilesReadyUid, fbDrive.fbUser?.uid, profiles, subscription.isPremium]);
+  }, [cloudProfilesReadyUid, fbDrive.fbUser?.uid, profiles]);
 
   useEffect(() => { saveProfiles(profiles); }, [profiles]);
   useEffect(() => {
@@ -1259,10 +1202,6 @@ function App() {
   }, [activeProfileId, activeProfileReady, store]);
 
   const createProfile = useCallback((name) => {
-    if (!subscription.isPremium) {
-      openPremium();
-      return;
-    }
     const cleanName = (name || "").trim() || "新帳本";
     const id = `profile_${Date.now().toString(36)}`;
     const profile = { id, name: cleanName, createdAt: new Date().toISOString() };
@@ -1279,7 +1218,7 @@ function App() {
     setUndoEntry(null);
     setEditing(null);
     setEntryOpen(false);
-  }, [openPremium, subscription.isPremium]);
+  }, []);
 
   const renameProfile = useCallback((id, name) => {
     const cleanName = (name || "").trim();
@@ -1375,7 +1314,7 @@ function App() {
     // Auto-fetch rates once per day
     const todayKey = new Date().toISOString().slice(0,10);
     const rateDateKey = profileScopedKey("akr-last-rate-date", activeProfile.id);
-    if(subscription.isPremium && localStorage.getItem(rateDateKey) !== todayKey) {
+    if(localStorage.getItem(rateDateKey) !== todayKey) {
       const initS = loadStore(activeProfile.id);
       const b = initS.settings.baseCurrency;
       fetch(`https://open.er-api.com/v6/latest/${b}`)
@@ -1397,7 +1336,7 @@ function App() {
         })
         .catch(e => reportError("自動同步匯率失敗", e, "自動同步匯率失敗，可稍後到設定手動同步。"));
     }
-  }, [activeProfile.id, subscription.isPremium]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeProfile.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (isNative()) return;
@@ -1502,11 +1441,11 @@ function App() {
                      <span style={{color:"var(--brand)"}}>已同步</span>
                      {fbDrive.lastUpload && <span className="text-gray-300">{new Date(fbDrive.lastUpload).toLocaleTimeString("zh-HK",{hour:"2-digit",minute:"2-digit"})}</span>}
                    </>
-                  : subscription.isPremium ? <span>☁️ 未啟用同步</span> : <span>本機儲存</span>}
+                  : <span>☁️ 未啟用同步</span>}
                </div>
                <div className="flex items-center gap-2">
                   {fbOn && <span className="text-xs text-gray-300 max-w-[100px] truncate">{fbDrive.fbUser.email?.split("@")[0]}</span>}
-                  <button onClick={openPremium}><PremiumBadge isPremium={subscription.isPremium}/></button>
+                   {fbOn && <span className="text-xs text-gray-300">雲端同步</span>}
                </div>
             </div>
           );
@@ -1540,11 +1479,9 @@ function App() {
               <>
                 {t==="home"  && <HomeView store={store} rates={rates} base={base} entries={monthEntries} allEntries={store.entries} onQuickAdd={openAdd} onOpenQuickTemplates={openQuickTemplateSettings} onEdit={openEdit} onDelete={removeEntry} onCopy={openCopy} monthTotals={monthTotals} viewMonth={viewMonth}/>}
                 {t==="cal"   && <CalendarView store={store} rates={rates} base={base} viewMonth={viewMonth} entries={monthEntries} onEdit={openEdit}/>}
-                {t==="chart" && (subscription.isPremium
-                  ? <ChartView store={store} rates={rates} base={base} entries={monthEntries} allEntries={store.entries} viewMonth={viewMonth} onEdit={openEdit}/>
-                  : <PremiumGate title="完整收支分析" description="升級 Premium 查看趨勢、分類分佈及預算分析。" onUpgrade={openPremium}/>)}
+                {t==="chart" && <ChartView store={store} rates={rates} base={base} entries={monthEntries} allEntries={store.entries} viewMonth={viewMonth} onEdit={openEdit}/>}
                 {t==="fun"   && <FunView store={store}/>}
-                {t==="set"   && <SettingsView store={store} setStore={setStore} fbDrive={fbDrive} profiles={profiles} activeProfileId={activeProfile.id} onSwitchProfile={switchProfile} onCreateProfile={createProfile} onRenameProfile={renameProfile} onDeleteProfile={deleteProfile} subscription={subscription} onUpgrade={openPremium} initialTab={settingsTabRequest} onInitialTabHandled={clearSettingsTabRequest}/>}
+                {t==="set"   && <SettingsView store={store} setStore={setStore} fbDrive={fbDrive} profiles={profiles} activeProfileId={activeProfile.id} onSwitchProfile={switchProfile} onCreateProfile={createProfile} onRenameProfile={renameProfile} onDeleteProfile={deleteProfile} initialTab={settingsTabRequest} onInitialTabHandled={clearSettingsTabRequest}/>}
               </>
             )}
           </div>
@@ -1586,16 +1523,6 @@ function App() {
       )}
       {monthPickerOpen && (
         <MonthPicker value={viewMonth} onChange={setViewMonth} onClose={()=>setMonthPickerOpen(false)}/>
-      )}
-      {paywallOpen && (
-        <div className="fixed inset-0 z-[100] bg-gray-50 overflow-y-auto safe-bottom fullscreen-safe-top">
-          <div className="sticky top-0 z-10 bg-white border-b border-gray-100 px-4 py-3 flex items-center justify-between">
-            <button onClick={closePremium} className="text-sm text-gray-500">關閉</button>
-            <div className="text-sm font-bold">Premium</div>
-            <div className="w-9"/>
-          </div>
-          <div className="p-3 max-w-lg mx-auto"><PremiumView subscription={subscription} fbDrive={fbDrive} onRefreshMembership={refreshMembership}/></div>
-        </div>
       )}
       {undoEntry && (
         <UndoToast onUndo={undoDelete} onDismiss={()=>setUndoEntry(null)}/>
@@ -2798,7 +2725,7 @@ function OtherView({store, setStore}) {
     }
   };
   const aboutRows = [
-    ["版本","v2.4.16",false],
+    ["版本","v2.4.17",false],
     ["製作者","AKiRa",true],
     ["技術","React · Capacitor",false],
     ["支援幣種","MOP · HKD · CNY · JPY · TWD",false],
@@ -3112,7 +3039,7 @@ function ReceiptView({store}) {
   );
 }
 
-function ProfileSettings({profiles, activeProfileId, onSwitchProfile, onCreateProfile, onRenameProfile, onDeleteProfile, isPremium, onUpgrade}) {
+function ProfileSettings({profiles, activeProfileId, onSwitchProfile, onCreateProfile, onRenameProfile, onDeleteProfile}) {
   const [newName, setNewName] = useState("");
   const [editingId, setEditingId] = useState(null);
   const [editingName, setEditingName] = useState("");
@@ -3174,25 +3101,19 @@ function ProfileSettings({profiles, activeProfileId, onSwitchProfile, onCreatePr
       </div>
       <div className="bg-white rounded-2xl shadow-sm p-4 space-y-3">
         <div className="text-sm font-semibold text-gray-700">新增全新帳本</div>
-        {isPremium ? (
-          <div className="flex gap-2">
-            <input value={newName} onChange={e=>setNewName(e.target.value)} onKeyDown={e=>{if(e.key==="Enter") submitNew();}}
-              placeholder="例如：個人、家庭公數、旅行"
-              className="flex-1 min-w-0 border border-gray-200 rounded-xl px-3 py-2.5 text-sm"/>
-            <button onClick={submitNew} disabled={!newName.trim()}
-              className="px-4 rounded-xl text-sm font-semibold text-white disabled:opacity-40"
-              style={{background:"var(--brand)"}}>新增</button>
-          </div>
-        ) : (
-          <button onClick={onUpgrade} className="w-full py-3 rounded-xl text-sm font-semibold bg-amber-50 text-amber-700">
-            ✨ Premium 解鎖多帳本
-          </button>
-        )}
+        <div className="flex gap-2">
+          <input value={newName} onChange={e=>setNewName(e.target.value)} onKeyDown={e=>{if(e.key==="Enter") submitNew();}}
+            placeholder="例如：個人、家庭公數、旅行"
+            className="flex-1 min-w-0 border border-gray-200 rounded-xl px-3 py-2.5 text-sm"/>
+          <button onClick={submitNew} disabled={!newName.trim()}
+            className="px-4 rounded-xl text-sm font-semibold text-white disabled:opacity-40"
+            style={{background:"var(--brand)"}}>新增</button>
+        </div>
       </div>
     </div>
   );
 }
-function SettingsView({store, setStore, fbDrive, profiles, activeProfileId, onSwitchProfile, onCreateProfile, onRenameProfile, onDeleteProfile, subscription, onUpgrade, initialTab, onInitialTabHandled}) {
+function SettingsView({store, setStore, fbDrive, profiles, activeProfileId, onSwitchProfile, onCreateProfile, onRenameProfile, onDeleteProfile, initialTab, onInitialTabHandled}) {
   const [tab, setTab] = useState(null);
   useEffect(() => {
     if (!initialTab) return;
@@ -3205,7 +3126,6 @@ function SettingsView({store, setStore, fbDrive, profiles, activeProfileId, onSw
     return ()=>clearLayer('settingsTab');
   },[tab]);
   const menu = [
-    {key:"premium",icon:"✨", label:subscription.isPremium?"Premium 使用中":"升級 Premium", desc:"訂閱、恢復購買及管理計劃", bg:"#FFFBEB"},
     {key:"profile",icon:"👤", label:"帳本 / 用戶", desc:"切換或新增獨立記帳用戶",       bg:"#EEF2FF"},
     {key:"layout",icon:"📐", label:"頁面佈局",   desc:"調整首頁、月曆、圖表的卡片順序及顯示", bg:"#F0F4FF"},
     {key:"entry", icon:"🧾", label:"記帳頁面", desc:"設定付款方式、分類、日期及備註卡片顯示", bg:"#ECFEFF"},
@@ -3244,22 +3164,21 @@ function SettingsView({store, setStore, fbDrive, profiles, activeProfileId, onSw
         設定
       </button>
       <div className="tab-slide-right">
-        {tab==="premium" && <PremiumView subscription={subscription} fbDrive={fbDrive} onRefreshMembership={refreshMembership}/>}
-        {tab==="profile" && <ProfileSettings profiles={profiles} activeProfileId={activeProfileId} onSwitchProfile={onSwitchProfile} onCreateProfile={onCreateProfile} onRenameProfile={onRenameProfile} onDeleteProfile={onDeleteProfile} isPremium={subscription.isPremium} onUpgrade={onUpgrade}/>}
-        {tab==="layout" && (subscription.isPremium ? <LayoutSettings store={store} setStore={setStore}/> : <PremiumGate title="自訂頁面佈局" description="Premium 可以調整卡片順序同顯示內容。" onUpgrade={onUpgrade}/>)}
+        {tab==="profile" && <ProfileSettings profiles={profiles} activeProfileId={activeProfileId} onSwitchProfile={onSwitchProfile} onCreateProfile={onCreateProfile} onRenameProfile={onRenameProfile} onDeleteProfile={onDeleteProfile}/>}
+        {tab==="layout" && <LayoutSettings store={store} setStore={setStore}/>}
         {tab==="entry"  && <EntryLayoutSettings store={store} setStore={setStore}/>}
         {tab==="quick"  && <QuickTemplateSettings store={store} setStore={setStore}/>}
-        {tab==="cat"    && (subscription.isPremium ? <CatSettings store={store} setStore={setStore}/> : <PremiumGate title="自訂分類及付款方式" description="Premium 可以編輯收支分類同付款方式。" onUpgrade={onUpgrade}/>)}
+        {tab==="cat"    && <CatSettings store={store} setStore={setStore}/>}
         {tab==="budget" && <BudgetSettings store={store} setStore={setStore}/>}
-        {tab==="data"   && <DataSettings store={store} setStore={setStore} fbDrive={fbDrive} isPremium={subscription.isPremium} onUpgrade={onUpgrade}/>}
-        {tab==="basic"  && <BasicSettings store={store} setStore={setStore} isPremium={subscription.isPremium} onUpgrade={onUpgrade}/>}
+        {tab==="data"   && <DataSettings store={store} setStore={setStore} fbDrive={fbDrive}/>}
+        {tab==="basic"  && <BasicSettings store={store} setStore={setStore}/>}
         {tab==="other"  && <OtherView store={store} setStore={setStore}/>}
       </div>
     </div>
   );
 }
 
-function BasicSettings({store, setStore, isPremium, onUpgrade}) {
+function BasicSettings({store, setStore}) {
   const base = store.settings.baseCurrency;
   const rates = store.settings.rates;
   const [fetchingRates, setFetchingRates] = useState(false);
@@ -3309,10 +3228,6 @@ function BasicSettings({store, setStore, isPremium, onUpgrade}) {
     });
   };
   const fetchRates = async () => {
-    if (!isPremium) {
-      onUpgrade();
-      return;
-    }
     setFetchingRates(true);
     setRateMsg("");
     try {
@@ -3352,7 +3267,7 @@ function BasicSettings({store, setStore, isPremium, onUpgrade}) {
           <button onClick={fetchRates} disabled={fetchingRates}
             className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-xl font-medium transition-all ${fetchingRates?"bg-gray-100 text-gray-400":"bg-[color:var(--brand-soft)] text-[color:var(--brand)] active:opacity-70"}`}>
             <span className={fetchingRates?"animate-spin":""}>{fetchingRates?"⟳":"🔄"}</span>
-            {fetchingRates?"同步中...":isPremium?"同步最新匯率":"✨ 自動匯率"}
+            {fetchingRates?"同步中...":"同步最新匯率"}
           </button>
         </div>
         {rateMsg&&<div className="text-xs mb-3 px-1" style={{color:rateMsg.startsWith("✅")?"#2ECC71":"#E74C3C"}}>{rateMsg}</div>}
@@ -3766,53 +3681,7 @@ function FirebaseSyncPanel({ fbDrive, dataModified }) {
   );
 }
 
-function FirebaseMembershipLogin({ fbDrive }) {
-  const connected = !!fbDrive.fbUser;
-  const showApple = Capacitor.getPlatform() === "ios";
-  return (
-    <div className="bg-white rounded-2xl shadow-sm p-4 space-y-3">
-      <div>
-        <div className="text-sm font-semibold">👤 會員帳號</div>
-        <div className="text-xs text-gray-400 mt-1 leading-relaxed">
-          先登入以確認綁定此 Firebase UID 的會籍；登入唔會自動覆蓋本機資料。
-        </div>
-      </div>
-      {connected ? (
-        <>
-          <div className="flex items-center gap-2 text-xs bg-green-50 text-green-700 px-3 py-2.5 rounded-xl">
-            {fbDrive.fbUser.photoURL && <img src={fbDrive.fbUser.photoURL} className="w-5 h-5 rounded-full flex-shrink-0" alt=""/>}
-            <span className="truncate">已登入 {fbDrive.fbUser.email}</span>
-          </div>
-          <div className="text-xs text-amber-600 bg-amber-50 px-3 py-2 rounded-xl">
-            此帳號暫未確認到有效 Premium 會籍。
-          </div>
-          <button onClick={fbDrive.disconnect}
-            className="w-full py-2 rounded-xl text-xs text-gray-500 bg-gray-50 active:opacity-80">
-            登出會員帳號
-          </button>
-        </>
-      ) : (
-        <>
-          {fbDrive.syncError && (
-            <div className="text-xs text-amber-600 bg-amber-50 px-3 py-2 rounded-xl">⚠️ {fbDrive.syncError}</div>
-          )}
-          {showApple && (
-            <button onClick={()=>fbDrive.connect("apple")} disabled={fbDrive.syncing}
-              className="w-full py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-50 bg-black">
-               使用 Apple 登入
-            </button>
-          )}
-          <button onClick={()=>fbDrive.connect("google")} disabled={fbDrive.syncing}
-            className="w-full py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-50 bg-[#4285F4]">
-            {fbDrive.syncing ? "登入中…" : "使用 Google 帳號登入"}
-          </button>
-        </>
-      )}
-    </div>
-  );
-}
-
-function DataSettings({store, setStore, fbDrive, isPremium, onUpgrade}) {
+function DataSettings({store, setStore, fbDrive}) {
   const [msg, setMsg] = useState("");
   const [dialog, setDialog] = useState(null); // {title, message, onConfirm, danger}
   const flash = (m, isErr=false) => { setMsg({text:m, err:isErr}); setTimeout(()=>setMsg(null),3000); };
@@ -3896,23 +3765,16 @@ function DataSettings({store, setStore, fbDrive, isPremium, onUpgrade}) {
         <span className="privacy-status-icon">🛡️</span>
         <span>
           <span className="block text-sm font-bold">你嘅帳目預設只留喺裝置</span>
-          <span className="block text-xs mt-1 text-gray-400 leading-relaxed">唔使用第三方廣告追蹤；只有你主動登入並啟用 Premium 同步，資料先會上傳到 Firebase。</span>
+          <span className="block text-xs mt-1 text-gray-400 leading-relaxed">唔使用第三方廣告追蹤；只有你主動登入並啟用雲端同步，資料先會上傳到 Firebase。</span>
         </span>
       </div>
-      {isPremium ? (
-        <FirebaseSyncPanel fbDrive={fbDrive} dataModified={store._lastModified} />
-      ) : (
-        <>
-          <FirebaseMembershipLogin fbDrive={fbDrive} />
-          <PremiumGate title="雲端同步與換機恢復" description="Premium 以 Google 帳號安全同步帳本資料。" onUpgrade={onUpgrade}/>
-        </>
-      )}
+      <FirebaseSyncPanel fbDrive={fbDrive} dataModified={store._lastModified} />
 
       <div className="bg-white rounded-2xl shadow-sm p-4 space-y-3">
         <div className="text-sm font-semibold">資料備份</div>
         <button onClick={doExportCSV} className="w-full py-3 rounded-xl text-sm font-medium text-white" style={{background:"var(--brand)"}}>📤 匯出 CSV 備份</button>
         <label className="block w-full py-3 rounded-xl text-sm font-medium text-center border-2 border-dashed border-gray-200 text-gray-500 cursor-pointer hover:border-[color:var(--brand)]">
-          📥 免費匯入 CSV 備份
+          📥 匯入 CSV 備份
           <input type="file" accept=".csv,.txt" className="hidden" onChange={doImportCSV}/>
         </label>
         <div className="text-[11px] text-gray-400 leading-relaxed">匯入前會顯示筆數並由你確認；現有資料唔會被覆蓋。</div>
