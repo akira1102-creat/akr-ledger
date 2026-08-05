@@ -1,20 +1,4 @@
-export const MEMBERSHIP_COLLECTION = "qys_memberships";
 export const PROFILE_INDEX_COLLECTION = "akr_ledger_profiles";
-
-const toExpiryMs = value => {
-  if (!value) return 0;
-  if (typeof value.toMillis === "function") return value.toMillis();
-  if (typeof value.toDate === "function") return value.toDate().getTime();
-  const parsed = new Date(value).getTime();
-  return Number.isFinite(parsed) ? parsed : 0;
-};
-
-export const hasActivePremiumMembership = (membership, now = Date.now()) => {
-  if (!membership || membership.entitlement !== "premium" || membership.status !== "active") {
-    return false;
-  }
-  return membership.lifetime === true || toExpiryMs(membership.expiresAt) > now;
-};
 
 const cleanProfile = (profile, index) => {
   const id = String(profile?.id || "").trim();
@@ -63,10 +47,7 @@ export const resolveActiveProfile = (profiles = [], activeProfileId) => {
 };
 
 export const readAccountCloudState = async (db, uid) => {
-  const [membershipSnap, profileSnap] = await Promise.all([
-    db.collection(MEMBERSHIP_COLLECTION).doc(uid).get(),
-    db.collection(PROFILE_INDEX_COLLECTION).doc(uid).get(),
-  ]);
+  const profileSnap = await db.collection(PROFILE_INDEX_COLLECTION).doc(uid).get();
   const profileData = profileSnap.exists ? profileSnap.data() : null;
   let cloudProfiles = Array.isArray(profileData?.profiles) ? profileData.profiles : [];
   if (!cloudProfiles.length && profileData?.profilesJson) {
@@ -76,7 +57,6 @@ export const readAccountCloudState = async (db, uid) => {
     } catch {}
   }
   return {
-    isPremium: membershipSnap.exists && hasActivePremiumMembership(membershipSnap.data()),
     cloudProfiles,
   };
 };
