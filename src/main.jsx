@@ -4,6 +4,11 @@ import { Capacitor } from "@capacitor/core";
 import { App as NativeApp } from "@capacitor/app";
 import { FirebaseAuthentication } from "@capacitor-firebase/authentication";
 import {
+  readCloudBackups,
+  restoreCloudBackup,
+  writeCloudWithBackup,
+} from "./cloudBackups";
+import {
   isKnownProfile,
   mergeCloudProfiles,
   readAccountCloudState,
@@ -97,6 +102,9 @@ function useFirebaseSync(store, setStore, activeProfile, enabled=true) {
   const [startupDone, setStartupDone] = useState(false);
   const [syncing,    setSyncing]    = useState(false);
   const [syncError,  setSyncError]  = useState(null);
+  const [backups, setBackups] = useState([]);
+  const [backupsLoading, setBackupsLoading] = useState(false);
+  const [backupError, setBackupError] = useState(null);
 
   const storeRef = useRef(store);
   useEffect(() => { storeRef.current = store; }, [store]);
@@ -131,6 +139,7 @@ function useFirebaseSync(store, setStore, activeProfile, enabled=true) {
 
   const cloudDocId = (uid) => profileId === DEFAULT_PROFILE_ID ? uid : `${uid}__profile__${profileId}`;
   const docRef = (uid) => window._fbDb.collection("akr_ledger").doc(cloudDocId(uid));
+  const backupLedgerId = uid => cloudDocId(uid);
 
   const downloadFb = async (uid) => {
     const snap = await withTimeout(
@@ -149,10 +158,85 @@ function useFirebaseSync(store, setStore, activeProfile, enabled=true) {
 
   const uploadFb = async (uid, data) => {
     await withTimeout(
-      docRef(uid).set({ ...data, _ownerUid: uid, _cloudSyncedAt: new Date().toISOString() }),
+      writeCloudWithBackup(window._fbDb, {
+        uid,
+        ledgerId: backupLedgerId(uid),
+        data,
+        now: new Date(),
+      }),
       FIREBASE_TIMEOUT_MS,
-      "雲端資料上傳逾時，請檢查網路後再試。",
+      "雲端資料備份失敗，雲端版本未被覆蓋。",
     );
+  };
+
+  const loadBackups = async () => {
+    if (!enabled || !fbUser) {
+      setBackups([]);
+      return [];
+    }
+    const syncProfileId = profileId;
+    setBackupsLoading(true);
+    setBackupError(null);
+    try {
+      await loadFirebase();
+      const result = await withTimeout(
+        readCloudBackups(window._fbDb, {
+          uid: fbUser.uid,
+          ledgerId: backupLedgerId(fbUser.uid),
+        }),
+        FIREBASE_TIMEOUT_MS,
+        "雲端版本讀取逾時，請稍後再試。",
+      );
+      if (isCurrentProfile(syncProfileId)) setBackups(result);
+      return result;
+    } catch (error) {
+      if (isCurrentProfile(syncProfileId)) {
+        setBackupError(error.message || "雲端版本讀取失敗。");
+      }
+      return [];
+    } finally {
+      if (isCurrentProfile(syncProfileId)) setBackupsLoading(false);
+    }
+  };
+
+  const restoreBackup = async backupId => {
+    if (!enabled || !fbUser) throw new Error("請先登入 Google 帳號。");
+    const syncProfileId = profileId;
+    const now = new Date();
+    setSyncing(true);
+    setSyncError(null);
+    setBackupError(null);
+    try {
+      await loadFirebase();
+      const restored = await withTimeout(
+        restoreCloudBackup(window._fbDb, {
+          uid: fbUser.uid,
+          ledgerId: backupLedgerId(fbUser.uid),
+          backupId,
+          now,
+        }),
+        FIREBASE_TIMEOUT_MS,
+        "雲端版本還原逾時，現有資料未被更改。",
+      );
+      if (!isCurrentProfile(syncProfileId)) return null;
+      normalizeStore(restored);
+      justImportedRef.current = true;
+      setStore(restored);
+      setLastSync(now);
+      setLastUpload(now);
+      startupJustSyncedRef.current = true;
+      setStartupDone(true);
+      persistState(fbUser, now, now);
+      await loadBackups();
+      return restored;
+    } catch (error) {
+      if (isCurrentProfile(syncProfileId)) {
+        setBackupError(error.message || "雲端版本還原失敗，現有資料未被更改。");
+      }
+      throw error;
+    } finally {
+      if (isCurrentProfile(syncProfileId)) setSyncing(false);
+    }
   };
 
   const justImportedRef      = useRef(false);
@@ -168,6 +252,9 @@ function useFirebaseSync(store, setStore, activeProfile, enabled=true) {
     setLastUpload(nextSaved?.lastUpload ? new Date(nextSaved.lastUpload) : null);
     setStartupDone(false);
     setSyncError(null);
+    setBackups([]);
+    setBackupsLoading(false);
+    setBackupError(null);
     startupRanRef.current = false;
     justImportedRef.current = false;
     startupJustSyncedRef.current = false;
@@ -368,6 +455,7 @@ function useFirebaseSync(store, setStore, activeProfile, enabled=true) {
   const disconnect = () => {
     if (!window.confirm("確定斷開 Google 同步？（本機資料保留，雲端備份不刪除）")) return;
     setFbUser(null); setLastSync(null); setLastUpload(null); setSyncError(null);
+    setBackups([]); setBackupError(null); setBackupsLoading(false);
     setStartupDone(false);
     justImportedRef.current = false;
     startupJustSyncedRef.current = false;
@@ -385,7 +473,11 @@ function useFirebaseSync(store, setStore, activeProfile, enabled=true) {
     await loadFirebase();
     const snapshot = await window._fbDb.collection("akr_ledger").where("_ownerUid", "==", fbUser.uid).get();
     const batch = window._fbDb.batch();
-    snapshot.docs.forEach(item => batch.delete(item.ref));
+    for (const item of snapshot.docs) {
+      const backupSnapshot = await item.ref.collection("backups").get();
+      backupSnapshot.docs.forEach(backup => batch.delete(backup.ref));
+      batch.delete(item.ref);
+    }
     await batch.commit();
     const currentUser = window._fbAuth.currentUser;
     if (currentUser) await currentUser.delete();
@@ -394,6 +486,7 @@ function useFirebaseSync(store, setStore, activeProfile, enabled=true) {
     setLastSync(null);
     setLastUpload(null);
     setSyncError(null);
+    setBackups([]); setBackupError(null); setBackupsLoading(false);
     try { localStorage.removeItem(fbStateKey); } catch(e) {
       reportError("帳戶狀態清除失敗", e);
     }
@@ -480,6 +573,17 @@ function useFirebaseSync(store, setStore, activeProfile, enabled=true) {
     return () => { alive = false; };
   }, [fbUser?.uid, profileId, enabled]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  useEffect(() => {
+    if (!enabled || !fbUser || !startupDone) {
+      if (!fbUser) {
+        setBackups([]);
+        setBackupError(null);
+      }
+      return;
+    }
+    loadBackups();
+  }, [fbUser?.uid, profileId, enabled, startupDone]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── Debounce upload ───────────────────────────────────────────────────────
   useEffect(() => {
     if (!enabled) return;
@@ -504,7 +608,25 @@ function useFirebaseSync(store, setStore, activeProfile, enabled=true) {
   }, [store, fbUser, startupDone, profileId, enabled]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const connectForDeletion = providerName => connect(providerName, true);
-  return { enabled, fbUser, lastSync, lastUpload, syncing, syncError, connect, connectForDeletion, disconnect, syncNow, deleteCloudAccount, profileName: activeProfile?.name };
+  return {
+    enabled,
+    fbUser,
+    lastSync,
+    lastUpload,
+    syncing,
+    syncError,
+    backups,
+    backupsLoading,
+    backupError,
+    loadBackups,
+    restoreBackup,
+    connect,
+    connectForDeletion,
+    disconnect,
+    syncNow,
+    deleteCloudAccount,
+    profileName: activeProfile?.name,
+  };
 }
 // ===================== End GitHub Gist Sync =====================
 
@@ -3624,6 +3746,20 @@ function ConfirmDialog({open, title, message, onConfirm, onCancel, confirmLabel=
 function FirebaseSyncPanel({ fbDrive, dataModified }) {
   const connected = !!fbDrive.fbUser;
   const showApple = Capacitor.getPlatform() === "ios";
+  const [restoreMessage, setRestoreMessage] = useState(null);
+  const requestRestore = async backup => {
+    const dateLabel = new Date(`${backup.id}T00:00:00Z`).toLocaleDateString("zh-TW", {
+      year: "numeric", month: "2-digit", day: "2-digit",
+    });
+    if (!window.confirm(`確定還原 ${dateLabel} 的雲端版本？\n\n目前版本會先保存到今日快照，然後以 ${backup.entryCount} 筆資料取代目前帳本。`)) return;
+    setRestoreMessage(null);
+    try {
+      await fbDrive.restoreBackup(backup.id);
+      setRestoreMessage(`✅ 已還原 ${dateLabel} 版本`);
+    } catch (error) {
+      setRestoreMessage(`❌ 還原失敗：${error.message || "現有資料未被更改"}`);
+    }
+  };
   return (
     <div className="bg-white rounded-2xl shadow-sm p-4 space-y-3">
       <div>
@@ -3646,6 +3782,49 @@ function FirebaseSyncPanel({ fbDrive, dataModified }) {
           {dataModified && (
             <div className="text-xs text-gray-400">資料更新至：{new Date(dataModified).toLocaleString("zh-HK",{year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hour12:true})}</div>
           )}
+          <div className="rounded-xl border border-gray-100 bg-gray-50 p-3 space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-xs font-semibold text-gray-700">🕘 最近 7 日雲端版本</div>
+              <button
+                onClick={fbDrive.loadBackups}
+                disabled={fbDrive.backupsLoading || fbDrive.syncing}
+                className="text-[11px] text-[color:var(--brand)] disabled:opacity-50"
+              >
+                {fbDrive.backupsLoading ? "讀取中…" : "重新整理"}
+              </button>
+            </div>
+            <div className="text-[11px] text-gray-400 leading-relaxed">
+              每日最多保留一份覆蓋前的完整版本；備份失敗時不會覆蓋雲端資料。
+            </div>
+            {fbDrive.backupError && (
+              <div className="text-[11px] text-amber-600 bg-amber-50 px-2.5 py-2 rounded-lg">⚠️ {fbDrive.backupError}</div>
+            )}
+            {restoreMessage && (
+              <div className="text-[11px] text-gray-600 bg-white px-2.5 py-2 rounded-lg">{restoreMessage}</div>
+            )}
+            {!fbDrive.backupsLoading && !fbDrive.backups?.length && (
+              <div className="text-[11px] text-gray-400">目前未有可還原的雲端版本。</div>
+            )}
+            {!!fbDrive.backups?.length && (
+              <div className="space-y-1.5">
+                {fbDrive.backups.map(backup => (
+                  <div key={backup.id} className="flex items-center gap-2 rounded-lg bg-white px-2.5 py-2">
+                    <div className="min-w-0 flex-1">
+                      <div className="text-xs font-medium text-gray-700">{backup.id}</div>
+                      <div className="text-[10px] text-gray-400">{backup.entryCount} 筆 · {backup.sourceLastModified ? new Date(backup.sourceLastModified).toLocaleString("zh-TW") : "修改時間未知"}</div>
+                    </div>
+                    <button
+                      onClick={() => requestRestore(backup)}
+                      disabled={fbDrive.syncing || fbDrive.backupsLoading}
+                      className="flex-shrink-0 rounded-lg px-2.5 py-1.5 text-[11px] font-semibold text-[color:var(--brand)] bg-[color:var(--brand-soft)] disabled:opacity-50"
+                    >
+                      還原
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
           <button onClick={fbDrive.syncNow} disabled={fbDrive.syncing}
             className="w-full py-2.5 rounded-xl text-sm font-semibold disabled:opacity-50 active:opacity-80"
             style={{color:"var(--brand)", background:"var(--brand-soft)"}}>
