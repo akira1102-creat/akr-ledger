@@ -9,6 +9,12 @@ export const PAYMENT_METHODS = [
 export const MAX_QUICK_TEMPLATES = 20;
 export const HOME_QUICK_TEMPLATE_LIMIT = 5;
 
+export function getQuickTemplateGridClass(templateCount, expanded = false) {
+  const count = Number(templateCount);
+  if (expanded || !Number.isFinite(count) || count <= 3) return "";
+  return count === 4 ? "quick-template-grid-compact-4" : "quick-template-grid-compact-5";
+}
+
 export const DEFAULT_ENTRY_SECTION_ORDER = ["payment", "category", "date", "note"];
 
 export const ENTRY_SECTION_IDS = [...DEFAULT_ENTRY_SECTION_ORDER];

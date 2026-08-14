@@ -24,7 +24,7 @@ import {
   DEFAULT_ENTRY_SECTION_ORDER,
   DEFAULT_ENTRY_SECTION_VISIBILITY,
   getMostUsedCategories,
-  getWeeklyInsight,
+  getQuickTemplateGridClass,
   HOME_QUICK_TEMPLATE_LIMIT,
   incrementCategoryUsage,
   MAX_QUICK_TEMPLATES,
@@ -1857,15 +1857,6 @@ function HomeView({store, rates, base, entries, allEntries, onQuickAdd, onOpenQu
   useEffect(() => {
     if (!hasMoreQuickTemplates) setShowAllQuickTemplates(false);
   }, [hasMoreQuickTemplates]);
-  const weeklyInsight = useMemo(
-    ()=>getWeeklyInsight(allEntries, {
-      today: now,
-      weekStart: weekStartSetting,
-      toBase: entry=>eBase(entry, rates, base),
-    }),
-    [allEntries, rates, base, todayISO, weekStartSetting],
-  );
-
   const homeLayout = store.layout?.home || DEFAULT_LAYOUT.home;
   const renderHomeSection = (id) => {
     if (id==="monthly_summary") return (
@@ -2045,7 +2036,7 @@ function HomeView({store, rates, base, entries, allEntries, onQuickAdd, onOpenQu
             <button type="button" onClick={()=>onQuickAdd()} className="quick-entry-button">＋ 快速記帳</button>
           </div>
         </div>
-        <div className="quick-template-grid">
+        <div className={`quick-template-grid ${getQuickTemplateGridClass(visibleQuickTemplates.length, showAllQuickTemplates)}`}>
           {visibleQuickTemplates.map((template,index)=>{
             const category=store.categories.expense.find(item=>item.id===template.category) || {};
             const method=(store.paymentMethods || PAYMENT_METHODS).find(item=>item.id===template.paymentMethod);
@@ -2065,13 +2056,6 @@ function HomeView({store, rates, base, entries, allEntries, onQuickAdd, onOpenQu
             {showAllQuickTemplates ? "收起模板" : `更多模板（還有 ${quickTemplates.length - HOME_QUICK_TEMPLATE_LIMIT} 個）`}
           </button>
         )}
-      </section>
-      <section className={`weekly-insight weekly-insight-${weeklyInsight.tone}`}>
-        <span className="weekly-insight-icon">{weeklyInsight.tone==="positive"?"↘":weeklyInsight.tone==="warning"?"↗":"✦"}</span>
-        <span>
-          <span className="block text-xs font-bold">每週小結</span>
-          <span className="block text-sm mt-0.5">{weeklyInsight.text}</span>
-        </span>
       </section>
       {homeLayout.filter(item=>item.visible).map(item=>renderHomeSection(item.id))}
     </div>
@@ -2847,7 +2831,7 @@ function OtherView({store, setStore}) {
     }
   };
   const aboutRows = [
-    ["版本","v2.4.18",false],
+    ["版本","v2.4.19",false],
     ["製作者","AKiRa",true],
     ["技術","React · Capacitor",false],
     ["支援幣種","MOP · HKD · CNY · JPY · TWD",false],

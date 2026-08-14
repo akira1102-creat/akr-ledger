@@ -112,6 +112,8 @@
     font-weight:800;
   }
   .quick-template-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 8px; margin-top: 14px; }
+  .quick-template-grid-compact-4 { grid-template-columns: repeat(4,minmax(0,1fr)); gap: 6px; }
+  .quick-template-grid-compact-5 { grid-template-columns: repeat(5,minmax(0,1fr)); gap: 5px; }
   .quick-template {
     min-width: 0;
     min-height: 76px;
@@ -124,6 +126,14 @@
   .quick-template-icon { display: block; font-size: 19px; margin-bottom: 5px; text-align: left; }
   .quick-template-name { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; font-weight:800; }
   .quick-template-meta { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin-top:2px; color:#9fb0c5; font-size:10px; }
+  .quick-template-grid-compact-4 .quick-template,
+  .quick-template-grid-compact-5 .quick-template { min-height: 58px; padding: 6px 4px; border-radius: 12px; }
+  .quick-template-grid-compact-4 .quick-template-icon,
+  .quick-template-grid-compact-5 .quick-template-icon { font-size: 16px; margin-bottom: 2px; text-align: center; }
+  .quick-template-grid-compact-4 .quick-template-name,
+  .quick-template-grid-compact-5 .quick-template-name { font-size: 10px; text-align: center; }
+  .quick-template-grid-compact-4 .quick-template-meta,
+  .quick-template-grid-compact-5 .quick-template-meta { font-size: 8px; text-align: center; }
   .quick-template-more {
     width:100%;
     margin-top:8px;
@@ -135,14 +145,6 @@
     font-size:12px;
     font-weight:800;
   }
-  .weekly-insight { display:flex; align-items:center; gap:11px; border-radius:17px; padding:12px 14px; }
-  .weekly-insight-icon { display:grid; place-items:center; width:34px; height:34px; flex-shrink:0; border-radius:12px; font-size:18px; font-weight:900; }
-  .weekly-insight-neutral { color:#475569; background:#eef6ff; }
-  .weekly-insight-neutral .weekly-insight-icon { color:#0284c7; background:#d9efff; }
-  .weekly-insight-positive { color:#176b50; background:#e8fbf3; }
-  .weekly-insight-positive .weekly-insight-icon { color:#0f9f70; background:#c9f4e3; }
-  .weekly-insight-warning { color:#9a5b16; background:#fff6df; }
-  .weekly-insight-warning .weekly-insight-icon { color:#d97706; background:#ffe9b0; }
   .entry-section-list { display:flex; flex-direction:column; gap:12px; }
   .entry-section-card {
     min-width:0; padding:11px; border:1px solid #edf0f4; border-radius:16px;
@@ -197,9 +199,6 @@
     display:grid; place-items:center; width:38px; height:38px; flex-shrink:0;
     border-radius:13px; background:#d9f7ea; font-size:18px;
   }
-  html.dark .weekly-insight-neutral { color:#bae6fd; background:#102b42; }
-  html.dark .weekly-insight-positive { color:#a7f3d0; background:#10352d; }
-  html.dark .weekly-insight-warning { color:#fde68a; background:#3c2c15; }
   html.dark .entry-section-card { border-color:#374151; background:#1f2937; }
   html.dark .entry-section-handle { border-color:#475569; color:#cbd5e1; background:#111827; }
   html.dark .payment-method, html.dark .quick-category, html.dark .more-details-button { background:#1f2937; border-color:#475569; color:#cbd5e1; }

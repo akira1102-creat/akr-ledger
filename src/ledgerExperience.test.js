@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   buildQuickTemplates,
   buildCategoryUsageFromEntries,
+  getQuickTemplateGridClass,
   getMostUsedCategories,
   getWeeklyInsight,
   incrementCategoryUsage,
@@ -11,6 +12,13 @@ import {
   PAYMENT_METHODS,
   reorderEntrySections,
 } from "./ledgerExperience.js";
+
+test("首頁快速模板超過三張時使用單行緊湊排列", () => {
+  assert.equal(getQuickTemplateGridClass(3, false), "");
+  assert.equal(getQuickTemplateGridClass(4, false), "quick-template-grid-compact-4");
+  assert.equal(getQuickTemplateGridClass(5, false), "quick-template-grid-compact-5");
+  assert.equal(getQuickTemplateGridClass(5, true), "");
+});
 
 test("分類快速卡按本機使用次數穩定取出最多十個可選分類", () => {
   const categories = [
