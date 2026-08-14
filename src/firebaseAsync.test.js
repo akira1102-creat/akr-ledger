@@ -1,6 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { waitForInitialAuthState, withTimeout } from "./firebaseAsync.js";
+import { getFirebaseErrorMessage, waitForInitialAuthState, withTimeout } from "./firebaseAsync.js";
+
+test("Firebase 權限錯誤轉成台灣繁體中文", () => {
+  assert.equal(
+    getFirebaseErrorMessage({
+      code: "permission-denied",
+      message: "Missing or insufficient permissions.",
+    }, "同步失敗"),
+    "雲端同步權限不足，請稍後再試。",
+  );
+});
 
 test("waitForInitialAuthState waits for Firebase's first restored user", async () => {
   const restoredUser = { uid: "test-user" };

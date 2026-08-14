@@ -32,3 +32,16 @@ export const withTimeout = (operation, timeoutMs, message) => new Promise((resol
     },
   );
 });
+
+export const getFirebaseErrorMessage = (error, fallback = "操作失敗。") => {
+  const code = String(error?.code || "");
+  const message = String(error?.message || "");
+  if (
+    code === "permission-denied"
+    || code.endsWith("/permission-denied")
+    || /missing or insufficient permissions/i.test(message)
+  ) {
+    return "雲端同步權限不足，請稍後再試。";
+  }
+  return message || fallback;
+};

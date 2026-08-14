@@ -17,7 +17,7 @@ import {
 } from "./cloudAccount";
 import { allFeaturesEnabled } from "./accessPolicy";
 import { isNative, lightHaptic, prepareNativeShell, setDailyReminder } from "./native";
-import { waitForInitialAuthState, withTimeout } from "./firebaseAsync";
+import { getFirebaseErrorMessage, waitForInitialAuthState, withTimeout } from "./firebaseAsync";
 import {
   buildCategoryUsageFromEntries,
   buildQuickTemplates,
@@ -191,7 +191,7 @@ function useFirebaseSync(store, setStore, activeProfile, enabled=true) {
       return result;
     } catch (error) {
       if (isCurrentProfile(syncProfileId)) {
-        setBackupError(error.message || "雲端版本讀取失敗。");
+        setBackupError(getFirebaseErrorMessage(error, "雲端版本讀取失敗。"));
       }
       return [];
     } finally {
@@ -231,7 +231,7 @@ function useFirebaseSync(store, setStore, activeProfile, enabled=true) {
       return restored;
     } catch (error) {
       if (isCurrentProfile(syncProfileId)) {
-        setBackupError(error.message || "雲端版本還原失敗，現有資料未被更改。");
+        setBackupError(getFirebaseErrorMessage(error, "雲端版本還原失敗，現有資料未被更改。"));
       }
       throw error;
     } finally {
@@ -333,7 +333,7 @@ function useFirebaseSync(store, setStore, activeProfile, enabled=true) {
           }
         });
       } catch(e) {
-        if (alive) setSyncError(e.message || "Google 登入狀態恢復失敗");
+        if (alive) setSyncError(getFirebaseErrorMessage(e, "Google 登入狀態恢復失敗"));
       } finally {
         redirectRestoreInFlightRef.current = false;
         if (alive && showRestoring) setSyncing(false);
@@ -446,8 +446,9 @@ function useFirebaseSync(store, setStore, activeProfile, enabled=true) {
       }
     } catch(e) {
       if (e.code !== "auth/popup-closed-by-user") {
-        setSyncError(e.message);
-        alert("❌ Google 登入失敗：" + (e.message || "未知錯誤"));
+        const message = getFirebaseErrorMessage(e, "未知錯誤");
+        setSyncError(message);
+        alert("❌ Google 登入失敗：" + message);
       }
     } finally { setSyncing(false); }
   };
@@ -509,7 +510,7 @@ function useFirebaseSync(store, setStore, activeProfile, enabled=true) {
       setLastSync(now); setLastUpload(now);
       persistState(fbUser, now, now);
     } catch(e) {
-      setSyncError(e.message);
+      setSyncError(getFirebaseErrorMessage(e, "同步失敗"));
     } finally { setSyncing(false); }
   };
 
@@ -566,7 +567,7 @@ function useFirebaseSync(store, setStore, activeProfile, enabled=true) {
           persistState(fbUser, now, cloudIsNewer ? lastUpload : now);
         }
       } catch(e) {
-        if (alive) setSyncError(e.message || "啟動同步失敗");
+        if (alive) setSyncError(getFirebaseErrorMessage(e, "啟動同步失敗"));
         if (alive) { startupJustSyncedRef.current = true; setStartupDone(true); }
       } finally { if (alive) setSyncing(false); }
     })();
@@ -601,7 +602,7 @@ function useFirebaseSync(store, setStore, activeProfile, enabled=true) {
         if (cancelled || !isCurrentProfile(syncProfileId)) return;
         await uploadFb(fbUser.uid, sourceStore);
         if (!cancelled && isCurrentProfile(syncProfileId)) { const now=new Date(); setLastSync(now); setLastUpload(now); persistState(fbUser,now,now); }
-      } catch(e) { if (!cancelled) setSyncError(e.message || "同步失敗"); }
+      } catch(e) { if (!cancelled) setSyncError(getFirebaseErrorMessage(e, "同步失敗")); }
       finally { if (!cancelled) setSyncing(false); }
     }, 1500);
     return () => { cancelled = true; clearTimeout(timer); };
@@ -2831,7 +2832,7 @@ function OtherView({store, setStore}) {
     }
   };
   const aboutRows = [
-    ["版本","v2.4.19",false],
+    ["版本","v2.4.20",false],
     ["製作者","AKiRa",true],
     ["技術","React · Capacitor",false],
     ["支援幣種","MOP · HKD · CNY · JPY · TWD",false],
