@@ -102,6 +102,11 @@ const ownsLedgerId = (uid, ledgerId) => (
 
 const ledgerRef = (db, ledgerId) => db.collection("akr_ledger").doc(ledgerId);
 const backupCollectionRef = (db, ledgerId) => ledgerRef(db, ledgerId).collection("backups");
+const ownedBackupQuery = (backups, uid, ledgerId) => (
+  typeof backups.where === "function"
+    ? backups.where("_ownerUid", "==", uid).where("_sourceLedgerId", "==", ledgerId)
+    : backups
+);
 
 const alreadyExists = error => (
   error?.code === "already-exists"
@@ -109,7 +114,24 @@ const alreadyExists = error => (
   || error?.code === "ALREADY_EXISTS"
 );
 
-const writeBackupIfMissing = async (backupRef, data, validateExisting = null) => {
+const writeBackupIfMissing = async (db, backupRef, data, validateExisting = null) => {
+  if (typeof db?.runTransaction === "function") {
+    let created = false;
+    await db.runTransaction(async transaction => {
+      created = false;
+      const current = await transaction.get(backupRef);
+      if (current.exists) {
+        if (validateExisting && !validateExisting(current.data() || {})) {
+          throw new Error("Backup ownership mismatch");
+        }
+        return;
+      }
+      transaction.set(backupRef, data);
+      created = true;
+    });
+    return created;
+  }
+
   const current = await backupRef.get();
   if (current.exists) {
     if (validateExisting && !validateExisting(current.data() || {})) {
@@ -175,12 +197,13 @@ export const backupBeforeUpload = async (db, {
     sourceLastModified: currentData._lastModified || null,
   });
   const created = await writeBackupIfMissing(
+    db,
     backupRef,
     backupData,
     data => validateBackupData(data, uid, ledgerId),
   );
 
-  const list = await backups.get();
+  const list = await ownedBackupQuery(backups, uid, ledgerId).get();
   const documents = Array.isArray(list?.docs) ? list.docs : [];
   const { remove } = selectBackupDocuments(documents, now);
   await deleteBackupDocuments(db, remove);
@@ -209,7 +232,8 @@ export const readCloudBackups = async (db, {
   now = new Date(),
 } = {}) => {
   if (!ownsLedgerId(uid, ledgerId)) throw new Error("Invalid ledger ownership");
-  const snapshot = await backupCollectionRef(db, ledgerId).get();
+  const backups = backupCollectionRef(db, ledgerId);
+  const snapshot = await ownedBackupQuery(backups, uid, ledgerId).get();
   const documents = Array.isArray(snapshot?.docs) ? snapshot.docs : [];
   const { keep } = selectBackupDocuments(documents, now);
   return keep

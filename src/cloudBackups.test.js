@@ -61,6 +61,7 @@ const makeBackupFakeDb = (config = {}, calls = []) => {
   });
   const backupCollection = {
     doc: id => backupRef(id),
+    where: () => backupCollection,
     get: async () => ({
       docs: [...backups.entries()].map(([id, data]) => snapshot(id, data, backupRef(id))),
     }),
@@ -173,6 +174,32 @@ test("主文件存在時先備份再覆蓋", async () => {
   assert.equal(backupIndex < ledgerIndex, true);
 });
 
+test("可用 Firestore transaction 時以交易建立每日快照", async () => {
+  const calls = [];
+  const db = makeBackupFakeDb({
+    ledger: { entries: [{ id: "old" }], _ownerUid: "uid-1" },
+  }, calls);
+  let transactionUsed = false;
+  db.runTransaction = async callback => {
+    transactionUsed = true;
+    const writes = [];
+    const transaction = {
+      get: ref => ref.get(),
+      set: (ref, data) => writes.push({ ref, data }),
+    };
+    await callback(transaction);
+    await Promise.all(writes.map(({ ref, data }) => ref.set(data)));
+  };
+
+  await backupBeforeUpload(db, {
+    uid: "uid-1",
+    ledgerId: "uid-1",
+    now: new Date("2026-08-14T12:00:00Z"),
+  });
+
+  assert.equal(transactionUsed, true);
+});
+
 test("備份失敗時不會寫入主文件", async () => {
   const calls = [];
   const db = makeBackupFakeDb({
@@ -261,6 +288,30 @@ test("只返回目前帳本最近七日且資料合法的快照摘要", async ()
   });
   assert.deepEqual(result.map(item => item.id), ["2026-08-14"]);
   assert.equal(result[0].entryCount, 1);
+});
+
+test("設定畫面可安全處理空清單及七筆快照摘要", async () => {
+  const now = new Date("2026-08-14T12:00:00Z");
+  const empty = await readCloudBackups(makeBackupFakeDb(), {
+    uid: "uid-1",
+    ledgerId: "uid-1",
+    now,
+  });
+  assert.deepEqual(empty, []);
+
+  const backups = Object.fromEntries(getBackupDates(now).map((id, index) => [id, {
+    entries: Array.from({ length: index + 1 }, (_, entryIndex) => ({ id: `${id}-${entryIndex}` })),
+    _ownerUid: "uid-1",
+    _sourceLedgerId: "uid-1",
+    _backupDate: id,
+  }]));
+  const result = await readCloudBackups(makeBackupFakeDb({ backups }), {
+    uid: "uid-1",
+    ledgerId: "uid-1",
+    now,
+  });
+  assert.equal(result.length, 7);
+  assert.deepEqual(result.map(item => item.id), getBackupDates(now));
 });
 
 test("還原前先保存目前主文件並返回選定快照", async () => {

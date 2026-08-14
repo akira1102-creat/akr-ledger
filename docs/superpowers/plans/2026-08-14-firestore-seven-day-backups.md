@@ -229,6 +229,7 @@ git -C "D:\Vibe Coding\akr-ledger-mobile" commit -m "允許帳本七日快照存
 - Modify: `D:\Vibe Coding\akr-ledger\package-lock.json`
 - Modify: `D:\Vibe Coding\akr-ledger\public\sw.js`
 - Modify: `D:\Vibe Coding\akr-ledger\sw.js`
+- Modify: `D:\Vibe Coding\akr-ledger\src\main.jsx` app version row
 - Generated: `D:\Vibe Coding\akr-ledger\index.html`, `D:\Vibe Coding\akr-ledger\assets\*` via build script
 
 - [ ] **Step 1: Bump the PWA version and cache identifier**
