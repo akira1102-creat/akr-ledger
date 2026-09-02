@@ -51,6 +51,12 @@ const reportError = (scope, error, userMessage) => {
   window.dispatchEvent(new CustomEvent("akr-app-error", { detail: { message } }));
 };
 
+const updatePwaStatusBarStyle = dark => {
+  if (typeof document === "undefined") return;
+  const statusBar = document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]');
+  if (statusBar) statusBar.setAttribute("content", dark ? "black-translucent" : "default");
+};
+
 /* ===================== Firebase / Google 同步 ===================== */
 const FB_STATE_KEY = "akr-fb-state";
 const FB_REDIRECT_KEY = "akr-fb-redirect-pending";
@@ -2801,6 +2807,7 @@ function OtherView({store, setStore}) {
   const applyTheme = (t) => {
     const dark = t==="dark"||(t==="system"&&window.matchMedia("(prefers-color-scheme:dark)").matches);
     document.documentElement.classList.toggle("dark", dark);
+    updatePwaStatusBarStyle(dark);
     localStorage.setItem("akr-theme", t);
     setTheme(t);
   };
@@ -2832,7 +2839,7 @@ function OtherView({store, setStore}) {
     }
   };
   const aboutRows = [
-    ["版本","v2.4.20",false],
+    ["版本","v2.4.21",false],
     ["製作者","AKiRa",true],
     ["技術","React · Capacitor",false],
     ["支援幣種","MOP · HKD · CNY · JPY · TWD",false],

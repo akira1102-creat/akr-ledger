@@ -19,11 +19,12 @@
     --brand-glow: rgba(14,165,233,0.45);
   }
   * { -webkit-tap-highlight-color: transparent; box-sizing: border-box; }
-  html { overscroll-behavior-x: none; }
+  /* Paint the iOS safe-area/status-bar region with the same shell color. */
+  html { background: #F8F9FA; overscroll-behavior-x: none; }
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #F8F9FA; overscroll-behavior-x: none; }
 
   /* ── Dark Mode ── */
-  html.dark { --brand-soft: rgba(255,107,138,0.15); }
+  html.dark { --brand-soft: rgba(255,107,138,0.15); background: #111827; }
   html.dark.accent-sky { --brand-soft: rgba(14,165,233,0.15); }
   html.dark body { background: #111827; color: #f9fafb; }
   html.dark .bg-white  { background-color: #1f2937 !important; }

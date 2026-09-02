@@ -3,6 +3,12 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="錢有數" />
+  <!-- iOS Home Screen mode: the inline theme bootstrap changes this to
+       black-translucent before React renders when dark mode is active. -->
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
   <meta name="theme-color" content="#F8F9FA" media="(prefers-color-scheme: light)" />
   <meta name="theme-color" content="#111827" media="(prefers-color-scheme: dark)" />
   <link rel="manifest" href="./manifest.json" />
@@ -14,6 +20,8 @@
       var dark = theme === "dark" ||
         (theme === "system" && window.matchMedia("(prefers-color-scheme:dark)").matches);
       if (dark) document.documentElement.classList.add("dark");
+      var statusBar = document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]');
+      if (statusBar) statusBar.setAttribute("content", dark ? "black-translucent" : "default");
       if ((localStorage.getItem("akr-accent") || "sky") === "sky") {
         document.documentElement.classList.add("accent-sky");
       }
