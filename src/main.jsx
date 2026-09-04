@@ -53,6 +53,8 @@ const reportError = (scope, error, userMessage) => {
 
 const updatePwaStatusBarStyle = dark => {
   if (typeof document === "undefined") return;
+  const themeColor = document.querySelector('meta[name="theme-color"]');
+  if (themeColor) themeColor.setAttribute("content", dark ? "#1f2937" : "#ffffff");
   const statusBar = document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]');
   if (statusBar) statusBar.setAttribute("content", dark ? "black-translucent" : "default");
 };
@@ -1400,6 +1402,21 @@ function App() {
   }, []);
 
   useEffect(()=>{ tabRef.current=tab; }, [tab]);
+
+  useEffect(() => {
+    const systemTheme = window.matchMedia("(prefers-color-scheme: dark)");
+    const syncSystemTheme = () => {
+      if ((localStorage.getItem("akr-theme") || "system") !== "system") return;
+      document.documentElement.classList.toggle("dark", systemTheme.matches);
+      updatePwaStatusBarStyle(systemTheme.matches);
+    };
+    systemTheme.addEventListener("change", syncSystemTheme);
+    window.addEventListener("pageshow", syncSystemTheme);
+    return () => {
+      systemTheme.removeEventListener("change", syncSystemTheme);
+      window.removeEventListener("pageshow", syncSystemTheme);
+    };
+  }, []);
 
   useEffect(() => {
     prepareNativeShell();
@@ -2839,7 +2856,7 @@ function OtherView({store, setStore}) {
     }
   };
   const aboutRows = [
-    ["版本","v2.4.21",false],
+    ["版本","v2.4.22",false],
     ["製作者","AKiRa",true],
     ["技術","React · Capacitor",false],
     ["支援幣種","MOP · HKD · CNY · JPY · TWD",false],
