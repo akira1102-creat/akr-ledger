@@ -1,9 +1,10 @@
 // 錢有數 Service Worker
 // ⚠️ 每次部署新版本，請遞增 CACHE 版本號，舊快取會在 activate 時自動清除
-const CACHE = "qys-ledger-mobile-v2422";
+const CACHE = "qys-ledger-mobile-v2423";
 
 const STATIC_ASSETS = [
   "./manifest.json",
+  "./assets/manifest-D8D8Hmm9.json",
   "./icon-192.png",
   "./icon-512.png",
 ];
@@ -42,9 +43,12 @@ self.addEventListener("fetch", e => {
   const url = new URL(req.url);
   const isSameOrigin = url.origin === location.origin;
   const isHTML = req.destination === "document" || url.pathname.endsWith(".html") || url.pathname === "/" || url.pathname.endsWith("/");
+  const isManifest = req.destination === "manifest"
+    || url.pathname.endsWith("/manifest.json")
+    || url.pathname.endsWith("/assets/manifest-D8D8Hmm9.json");
 
-  // ── 同源 HTML：Network-first，開啟時優先取得最新入口
-  if (isSameOrigin && isHTML) {
+  // ── HTML 與固定網址 manifest：Network-first，離線時使用已保存版本
+  if (isSameOrigin && (isHTML || isManifest)) {
     e.respondWith(
       fetch(req, { cache: "no-store" }).then(res => {
         if (!res.ok) return res;
@@ -59,7 +63,7 @@ self.addEventListener("fetch", e => {
     return;
   }
 
-  // ── 同源靜態資源（icon, manifest 等）：Cache-first
+  // ── 同源靜態資源（icon、帶內容雜湊的 JS/CSS 等）：Cache-first
   if (isSameOrigin) {
     e.respondWith(
       caches.match(req).then(hit => {
