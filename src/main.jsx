@@ -2856,7 +2856,7 @@ function OtherView({store, setStore}) {
     }
   };
   const aboutRows = [
-    ["版本","v2.4.24",false],
+    ["版本","v2.4.25",false],
     ["製作者","AKiRa",true],
     ["技術","React · Capacitor",false],
     ["支援幣種","MOP · HKD · CNY · JPY · TWD",false],
@@ -3258,8 +3258,7 @@ function SettingsView({store, setStore, fbDrive, profiles, activeProfileId, onSw
   },[tab]);
   const menu = [
     {key:"account",icon:"👥", label:"帳本、用戶與同步", desc:"切換帳本、管理用戶、備份及雲端同步", bg:"#EEF2FF"},
-    {key:"layout",icon:"📐", label:"頁面佈局",   desc:"調整首頁、月曆、圖表的卡片順序及顯示", bg:"#F0F4FF"},
-    {key:"entry", icon:"🧾", label:"記帳頁面", desc:"設定付款方式、分類、日期及備註卡片顯示", bg:"#ECFEFF"},
+    {key:"layout",icon:"📐", label:"頁面設定", desc:"調整各頁卡片順序、顯示及記帳選項", bg:"#F0F4FF"},
     {key:"quick", icon:"⚡", label:"快速記帳模板", desc:"自訂首頁最多 20 個固定快速記帳按鈕",       bg:"#ECFEFF"},
     {key:"cat",   icon:"🏷️", label:"分類管理",   desc:"編輯收支分類及付款方式",       bg:"#FFF0F3"},
     {key:"budget",icon:"💰", label:"預算設定",   desc:"設定月度總預算及各分類上限",   bg:"#F0FFF4"},
@@ -3298,8 +3297,10 @@ function SettingsView({store, setStore, fbDrive, profiles, activeProfileId, onSw
           <ProfileSettings profiles={profiles} activeProfileId={activeProfileId} onSwitchProfile={onSwitchProfile} onCreateProfile={onCreateProfile} onRenameProfile={onRenameProfile} onDeleteProfile={onDeleteProfile}/>
           <DataSettings store={store} setStore={setStore} fbDrive={fbDrive}/>
         </div>}
-        {tab==="layout" && <LayoutSettings store={store} setStore={setStore}/>}
-        {tab==="entry"  && <EntryLayoutSettings store={store} setStore={setStore}/>}
+        {tab==="layout" && <div className="space-y-3">
+          <LayoutSettings store={store} setStore={setStore}/>
+          <EntryLayoutSettings store={store} setStore={setStore}/>
+        </div>}
         {tab==="quick"  && <QuickTemplateSettings store={store} setStore={setStore}/>}
         {tab==="cat"    && <CatSettings store={store} setStore={setStore}/>}
         {tab==="budget" && <BudgetSettings store={store} setStore={setStore}/>}
