@@ -2856,7 +2856,7 @@ function OtherView({store, setStore}) {
     }
   };
   const aboutRows = [
-    ["版本","v2.4.23",false],
+    ["版本","v2.4.24",false],
     ["製作者","AKiRa",true],
     ["技術","React · Capacitor",false],
     ["支援幣種","MOP · HKD · CNY · JPY · TWD",false],
@@ -3257,13 +3257,12 @@ function SettingsView({store, setStore, fbDrive, profiles, activeProfileId, onSw
     return ()=>clearLayer('settingsTab');
   },[tab]);
   const menu = [
-    {key:"profile",icon:"👤", label:"帳本 / 用戶", desc:"切換或新增獨立記帳用戶",       bg:"#EEF2FF"},
+    {key:"account",icon:"👥", label:"帳本、用戶與同步", desc:"切換帳本、管理用戶、備份及雲端同步", bg:"#EEF2FF"},
     {key:"layout",icon:"📐", label:"頁面佈局",   desc:"調整首頁、月曆、圖表的卡片順序及顯示", bg:"#F0F4FF"},
     {key:"entry", icon:"🧾", label:"記帳頁面", desc:"設定付款方式、分類、日期及備註卡片顯示", bg:"#ECFEFF"},
     {key:"quick", icon:"⚡", label:"快速記帳模板", desc:"自訂首頁最多 20 個固定快速記帳按鈕",       bg:"#ECFEFF"},
     {key:"cat",   icon:"🏷️", label:"分類管理",   desc:"編輯收支分類及付款方式",       bg:"#FFF0F3"},
     {key:"budget",icon:"💰", label:"預算設定",   desc:"設定月度總預算及各分類上限",   bg:"#F0FFF4"},
-    {key:"data",  icon:"📁", label:"數據與同步", desc:"備份、匯入匯出、雲端同步",     bg:"#EFF6FF"},
     {key:"basic", icon:"💱", label:"幣值設定",   desc:"基準幣值與匯率管理",           bg:"#FFFBEB"},
     {key:"other", icon:"⚙️", label:"其他",       desc:"主題、提醒、關於",             bg:"#F5F3FF"},
   ];
@@ -3295,13 +3294,15 @@ function SettingsView({store, setStore, fbDrive, profiles, activeProfileId, onSw
         設定
       </button>
       <div className="tab-slide-right">
-        {tab==="profile" && <ProfileSettings profiles={profiles} activeProfileId={activeProfileId} onSwitchProfile={onSwitchProfile} onCreateProfile={onCreateProfile} onRenameProfile={onRenameProfile} onDeleteProfile={onDeleteProfile}/>}
+        {tab==="account" && <div className="space-y-3">
+          <ProfileSettings profiles={profiles} activeProfileId={activeProfileId} onSwitchProfile={onSwitchProfile} onCreateProfile={onCreateProfile} onRenameProfile={onRenameProfile} onDeleteProfile={onDeleteProfile}/>
+          <DataSettings store={store} setStore={setStore} fbDrive={fbDrive}/>
+        </div>}
         {tab==="layout" && <LayoutSettings store={store} setStore={setStore}/>}
         {tab==="entry"  && <EntryLayoutSettings store={store} setStore={setStore}/>}
         {tab==="quick"  && <QuickTemplateSettings store={store} setStore={setStore}/>}
         {tab==="cat"    && <CatSettings store={store} setStore={setStore}/>}
         {tab==="budget" && <BudgetSettings store={store} setStore={setStore}/>}
-        {tab==="data"   && <DataSettings store={store} setStore={setStore} fbDrive={fbDrive}/>}
         {tab==="basic"  && <BasicSettings store={store} setStore={setStore}/>}
         {tab==="other"  && <OtherView store={store} setStore={setStore}/>}
       </div>

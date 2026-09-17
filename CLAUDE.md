@@ -102,7 +102,7 @@ No OAuth — PAT stored in localStorage.
 --brand: #FF6B8A; --brand-soft: #FFF0F3; --income: #2ECC71; --expense: #E74C3C;
 ```
 
-## SW Cache (`sw.js`) — current: `qys-ledger-mobile-v2423`
+## SW Cache (`sw.js`) — current: `qys-ledger-mobile-v2424`
 
 Keep the installed manifest URL `assets/manifest-D8D8Hmm9.json` stable. Its filename is historical, not a content hash anymore. Update both `manifest.json` and `public/manifest.json` together; the Service Worker serves manifests network-first with an offline fallback.
 
